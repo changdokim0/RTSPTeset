@@ -1,0 +1,13 @@
+1. upgrade restful api 설계 및 정의
+2. upgrade db migration 구조 설계 및 적용
+3. upgrade Applicationt 생성 및 초기 구조 작업
+
+https://hanwhavision.atlassian.net/browse/PX-9841
+https://hanwhavision.atlassian.net/browse/PX-9842
+        SPDLOG_INFO(" ========>>>>>>> [ArchiveL] PushVideoChunkBuffer begin time [{}], end time [{}]", media_datas->GetChunkBeginTime(), media_datas->GetChunkEndTime());
+		
+		[reader_stream_chunk.cc:149] GetGovFrames index [31], request time[1735727892614],  request select_time[1735727892614
+		
+		DDX_Control(pDX, IDC_EDT_CSV_ADDR, m_csv_addr);
+		IDC_EDIT_FILELOAD_SEEK[2025-01-02 11:18:35] [INFO] CFileLoaderTab.cpp:89 - 
+[2025-01-02 11:22:33] [INFO] CFileLoaderTab.cpp:89 - 

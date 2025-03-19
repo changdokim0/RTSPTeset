@@ -1,0 +1,67 @@
+# Created by https://www.toptal.com/developers/gitignore/api/c++
+# Edit at https://www.toptal.com/developers/gitignore?templates=c++
+
+### C++ ###
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Manifest Json Files
+*.json
+
+#sign.bat
+*.bat
+
+# directories
+# ignore all dir name
+/**/build.*/
+#build.pnx/
+#build.pnx_r/
+#build.pnx_d/
+#build.pnx_test/
+#build.phoenix_server_linux_release/
+#build.phoenix_server_linux_debug/
+#build.phoenix_server_linux_coverage/
+7_debug_layer/
+package/linux/output
+package/windows/output
+.vs/
+.vscode/
+release/
+release/phoenix_server_windows_debug
+release/phoenix_server_windows_release
+release/phoenix_server_windows_test
+
+!package/windows/Microsoft.VC142.CRT/Debug/*.dll
+!package/windows/Microsoft.VC142.CRT/Release/*.dll
+!package/windows/dump_cmd/*
+# End of https://www.toptal.com/developers/gitignore/api/c++

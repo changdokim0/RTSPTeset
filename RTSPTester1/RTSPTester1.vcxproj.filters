@@ -1,0 +1,177 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="소스 파일">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="헤더 파일">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="리소스 파일">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="FileLoader">
+      <UniqueIdentifier>{7c038e93-ea15-43f9-81e9-2756c9f8fa73}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="phoenix_include">
+      <UniqueIdentifier>{4c21eed6-acf3-45f4-9e10-40474da98fe1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="View">
+      <UniqueIdentifier>{d401c28c-f96e-4929-bb68-ee40b32693c0}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="RTSPTester1.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="RTSPTester1Dlg.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="framework.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="targetver.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="Resource.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="pch.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="RTSPConnector.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="define.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="CFileLoaderTab.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="CRtspReceiver.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="archive_manager\modules\includes\reader_worker.h">
+      <Filter>FileLoader</Filter>
+    </ClInclude>
+    <ClInclude Include="archive_manager\includes\archive_define.h">
+      <Filter>FileLoader</Filter>
+    </ClInclude>
+    <ClInclude Include="archive_manager\modules\includes\reader_object.h">
+      <Filter>FileLoader</Filter>
+    </ClInclude>
+    <ClInclude Include="archive_manager\modules\includes\archive_chunk_buffer.h">
+      <Filter>FileLoader</Filter>
+    </ClInclude>
+    <ClInclude Include="archive_manager\includes\archive_object.h">
+      <Filter>FileLoader</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\phoenix\define_data.h">
+      <Filter>phoenix_include</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\phoenix\define_time.h">
+      <Filter>phoenix_include</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\phoenix\MediaDefine.h">
+      <Filter>phoenix_include</Filter>
+    </ClInclude>
+    <ClInclude Include="archive_manager\modules\includes\reader_stream_chunk.h">
+      <Filter>FileLoader</Filter>
+    </ClInclude>
+    <ClInclude Include="archive_manager\modules\includes\stream_cryptor.h">
+      <Filter>FileLoader</Filter>
+    </ClInclude>
+    <ClInclude Include="archive_manager\modules\includes\file_indexer.h">
+      <Filter>FileLoader</Filter>
+    </ClInclude>
+    <ClInclude Include="archive_manager\modules\includes\data_loader.h">
+      <Filter>FileLoader</Filter>
+    </ClInclude>
+    <ClInclude Include="archive_manager\modules\includes\archive_util.h">
+      <Filter>FileLoader</Filter>
+    </ClInclude>
+    <ClInclude Include="archive_manager\modules\includes\file_searcher.h">
+      <Filter>FileLoader</Filter>
+    </ClInclude>
+    <ClInclude Include="CD3dVideoWnd.h">
+      <Filter>View</Filter>
+    </ClInclude>
+    <ClInclude Include="FFmpegWrapper.h">
+      <Filter>View</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="RTSPTester1.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="pch.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="RTSPConnector.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="CFileLoaderTab.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="CRtspReceiver.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="archive_manager\modules\reader_worker.cc">
+      <Filter>FileLoader</Filter>
+    </ClCompile>
+    <ClCompile Include="archive_manager\archive_define.cc">
+      <Filter>FileLoader</Filter>
+    </ClCompile>
+    <ClCompile Include="archive_manager\modules\reader_object.cc">
+      <Filter>FileLoader</Filter>
+    </ClCompile>
+    <ClCompile Include="archive_manager\modules\archive_chunk_buffer.cc">
+      <Filter>FileLoader</Filter>
+    </ClCompile>
+    <ClCompile Include="archive_manager\modules\reader_stream_chunk.cc">
+      <Filter>FileLoader</Filter>
+    </ClCompile>
+    <ClCompile Include="archive_manager\modules\stream_cryptor.cc">
+      <Filter>FileLoader</Filter>
+    </ClCompile>
+    <ClCompile Include="archive_manager\modules\file_indexer.cc">
+      <Filter>FileLoader</Filter>
+    </ClCompile>
+    <ClCompile Include="archive_manager\modules\data_loader.cc">
+      <Filter>FileLoader</Filter>
+    </ClCompile>
+    <ClCompile Include="archive_manager\modules\archive_util.cc">
+      <Filter>FileLoader</Filter>
+    </ClCompile>
+    <ClCompile Include="archive_manager\modules\file_searcher.cc">
+      <Filter>FileLoader</Filter>
+    </ClCompile>
+    <ClCompile Include="CD3dVideoWnd.cpp">
+      <Filter>View</Filter>
+    </ClCompile>
+    <ClCompile Include="RTSPTester1Dlg.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="FFmpegWrapper.cpp">
+      <Filter>View</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="RTSPTester1.rc">
+      <Filter>리소스 파일</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="res\RTSPTester1.rc2">
+      <Filter>리소스 파일</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="res\RTSPTester1.ico">
+      <Filter>리소스 파일</Filter>
+    </Image>
+  </ItemGroup>
+</Project>
