@@ -104,7 +104,7 @@ void CFileLoaderTab::OpenFileLoad(CString filePath)
 			///TEST
 		}
 		else {
-			LOG(AL_INFO, "");
+			//LOG(AL_INFO, "");
 			break;
 		}
 		//break;
@@ -238,7 +238,7 @@ void CFileLoaderTab::OnBnClickedBtnFileloadSeek()
 	bool ret = read_object_.get()->LoadDataByIndex(neekTime, ArchiveReadType::kArchiveReadPrev);
 
 	std::shared_ptr<ArchiveChunkBuffer>  stream_chunk = read_object_->GetStreamChunk();
-	LOG(AL_INFO, "%d", 4);
+	//LOG(AL_INFO, "%d", 4);
 }
 
 

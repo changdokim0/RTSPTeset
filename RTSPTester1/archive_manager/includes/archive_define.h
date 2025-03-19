@@ -33,13 +33,14 @@
 
 #ifdef _WIN32
 #ifdef ARCHIVE_MANAGER_EXPORTS
-#define ARCHIVE_MANAGER_API __declspec(dllexport)
+#define ARCHIVE_MANAGER_API
 #else
-#define ARCHIVE_MANAGER_API __declspec(dllimport)
+#define ARCHIVE_MANAGER_API
 #endif
 #else
 #define ARCHIVE_MANAGER_API
 #endif
+
 
 #define _CRT_SECURE_NO_WARNINGS
 

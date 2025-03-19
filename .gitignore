@@ -65,3 +65,18 @@ release/phoenix_server_windows_test
 !package/windows/Microsoft.VC142.CRT/Release/*.dll
 !package/windows/dump_cmd/*
 # End of https://www.toptal.com/developers/gitignore/api/c++
+
+x64/Debug/*.exe
+x64/Debug/*.exp
+x64/Debug/*.pdb
+x64/Debug/*.lib
+
+x64/Release/*.exe
+x64/Release/*.exp
+x64/Release/*.pdb
+x64/Release/*.lib
+
+RTSP/x64
+RTSPTester1/x64
+lib/Debug/RTSPClientd*
+lib/Release/RTSPClientd*
