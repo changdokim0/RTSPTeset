@@ -1,148 +1,121 @@
+#include "pch.h"
 #include "CD3dVideoWnd.h"
+#include <algorithm> // std::clamp
 
-CMyVideoWnd::CMyVideoWnd()
+CustomPictureControl::CustomPictureControl()
+    : m_width(0), m_height(0)
 {
 }
 
-CMyVideoWnd::~CMyVideoWnd()
+CustomPictureControl::~CustomPictureControl()
 {
-    CleanupD3D();
 }
 
-BEGIN_MESSAGE_MAP(CMyVideoWnd, CStatic)
+BEGIN_MESSAGE_MAP(CustomPictureControl, CStatic)
+    ON_WM_PAINT()
 END_MESSAGE_MAP()
 
-
-void CMyVideoWnd::InitD3D(HWND hWnd)
+void CustomPictureControl::LoadVideoFrame(const uint8_t* yData, const uint8_t* uData, const uint8_t* vData, int width, int height)
 {
-    // Create device and swap chain
-    DXGI_SWAP_CHAIN_DESC sd;
-    ZeroMemory(&sd, sizeof(sd));
-    sd.BufferCount = 1;
-    sd.BufferDesc.Width = 800; // Set your width
-    sd.BufferDesc.Height = 600; // Set your height
-    sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    sd.OutputWindow = hWnd;
-    sd.SampleDesc.Count = 1;
-    sd.Windowed = TRUE;
+    m_width = width;
+    m_height = height;
 
-    D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0,
-        D3D11_SDK_VERSION, &sd, &m_pSwapChain, &m_pd3dDevice, nullptr, &m_pImmediateContext);
+    m_yData.assign(yData, yData + width * height);
+    m_uData.assign(uData, uData + width * height / 4);
+    m_vData.assign(vData, vData + width * height / 4);
 
-    // Create render target view
-    ID3D11Texture2D* pBackBuffer = nullptr;
-    m_pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&pBackBuffer);
-    m_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &m_pRenderTargetView);
-    pBackBuffer->Release();
-
-    m_pImmediateContext->OMSetRenderTargets(1, &m_pRenderTargetView, nullptr);
-
-    // Setup viewport
-    D3D11_VIEWPORT vp;
-    vp.Width = (FLOAT)800; // Set your width
-    vp.Height = (FLOAT)600; // Set your height
-    vp.MinDepth = 0.0f;
-    vp.MaxDepth = 1.0f;
-    vp.TopLeftX = 0;
-    vp.TopLeftY = 0;
-    m_pImmediateContext->RSSetViewports(1, &vp);
-
-    // Load shaders and create input layout
-    // Load your shaders here and create input layout
-
-    // Create texture and sampler state
-    // Create your texture and sampler state here
-
-
-
-
-        // Compile the vertex shader
-    ID3DBlob* pVSBlob = nullptr;
-    D3DCompileFromFile(L"YUVShader.hlsl", nullptr, nullptr, "VS", "vs_5_0", 0, 0, &pVSBlob, nullptr);
-    m_pd3dDevice->CreateVertexShader(pVSBlob->GetBufferPointer(), pVSBlob->GetBufferSize(), nullptr, &m_pVertexShader);
-
-    // Define the input layout
-    D3D11_INPUT_ELEMENT_DESC layout[] =
-    {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-    };
-    m_pd3dDevice->CreateInputLayout(layout, ARRAYSIZE(layout), pVSBlob->GetBufferPointer(), pVSBlob->GetBufferSize(), &m_pVertexLayout);
-    pVSBlob->Release();
-
-    // Compile the pixel shader
-    ID3DBlob* pPSBlob = nullptr;
-    D3DCompileFromFile(L"YUVShader.hlsl", nullptr, nullptr, "PS", "ps_5_0", 0, 0, &pPSBlob, nullptr);
-    m_pd3dDevice->CreatePixelShader(pPSBlob->GetBufferPointer(), pPSBlob->GetBufferSize(), nullptr, &m_pPixelShader);
-    pPSBlob->Release();
-
-    // Create texture and sampler state
-    // Create your texture and sampler state here
+    Invalidate(); // Force the window to repaint
 }
 
-void CMyVideoWnd::CleanupD3D()
+void CustomPictureControl::OnPaint()
 {
-    if (m_pImmediateContext) m_pImmediateContext->ClearState();
-    if (m_pRenderTargetView) m_pRenderTargetView->Release();
-    if (m_pSwapChain) m_pSwapChain->Release();
-    if (m_pImmediateContext) m_pImmediateContext->Release();
-    if (m_pd3dDevice) m_pd3dDevice->Release();
+    CPaintDC dc(this);
+    DrawYUV(&dc);
 }
 
-void CMyVideoWnd::Render()
+void CustomPictureControl::DrawYUV(CDC* pDC)
 {
-    if (m_pImmediateContext == nullptr)
+    if (m_width == 0 || m_height == 0)
         return;
 
-    // Clear the back buffer
-    float ClearColor[4] = { 0.0f, 0.125f, 0.3f, 1.0f };
-    m_pImmediateContext->ClearRenderTargetView(m_pRenderTargetView, ClearColor);
+    CRect rect;
+    GetClientRect(&rect);
 
-    // Render the scene
-    // Set your shaders, input layout, and draw your texture here
+    BITMAPINFO bmi;
+    memset(&bmi, 0, sizeof(bmi));
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = m_width;
+    bmi.bmiHeader.biHeight = -m_height; // Negative to indicate top-down bitmap
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 24;
+    bmi.bmiHeader.biCompression = BI_RGB;
 
-    // Present the information rendered to the back buffer to the front buffer (the screen)
-    m_pSwapChain->Present(0, 0);
-}
+    std::vector<uint8_t> rgbData(m_width * m_height * 3);
 
-void CMyVideoWnd::LoadYUV420Texture(const char* yuvFilePath, int width, int height)
-{
-    FILE* file = fopen(yuvFilePath, "rb");
-    if (!file) return;
+    for (int y = 0; y < m_height; ++y)
+    {
+        for (int x = 0; x < m_width; ++x)
+        {
+            int yIndex = y * m_width + x;
+            int uIndex = (y / 2) * (m_width / 2) + (x / 2);
+            int vIndex = (y / 2) * (m_width / 2) + (x / 2);
 
-    int imageSize = width * height * 3 / 2;
-    unsigned char* buffer = new unsigned char[imageSize];
-    fread(buffer, 1, imageSize, file);
-    fclose(file);
+            uint8_t Y = m_yData[yIndex];
+            uint8_t U = m_uData[uIndex];
+            uint8_t V = m_vData[vIndex];
 
-    // Create Y, U, V textures
-    D3D11_TEXTURE2D_DESC desc;
-    ZeroMemory(&desc, sizeof(desc));
-    desc.Width = width;
-    desc.Height = height;
-    desc.MipLevels = 1;
-    desc.ArraySize = 1;
-    desc.Format = DXGI_FORMAT_R8_UNORM;
-    desc.SampleDesc.Count = 1;
-    desc.Usage = D3D11_USAGE_DEFAULT;
-    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            int C = Y - 16;
+            int D = U - 128;
+            int E = V - 128;
 
-    D3D11_SUBRESOURCE_DATA initData;
-    ZeroMemory(&initData, sizeof(initData));
-    initData.pSysMem = buffer;
-    initData.SysMemPitch = width;
+            uint8_t R = std::clamp((298 * C + 409 * E + 128) >> 8, 0, 255);
+            uint8_t G = std::clamp((298 * C - 100 * D - 208 * E + 128) >> 8, 0, 255);
+            uint8_t B = std::clamp((298 * C + 516 * D + 128) >> 8, 0, 255);
 
-    m_pd3dDevice->CreateTexture2D(&desc, &initData, &m_pYUVTexture);
+            int rgbIndex = (y * m_width + x) * 3;
+            rgbData[rgbIndex] = B;
+            rgbData[rgbIndex + 1] = G;
+            rgbData[rgbIndex + 2] = R;
+        }
+    }
 
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc;
-    ZeroMemory(&srvDesc, sizeof(srvDesc));
-    srvDesc.Format = desc.Format;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Texture2D.MostDetailedMip = 0;
-    srvDesc.Texture2D.MipLevels = 1;
+    //StretchDIBits(pDC->GetSafeHdc(),
+    //    rect.left, rect.top, rect.Width(), rect.Height(),
+    //    0, 0, m_width, m_height,
+    //    rgbData.data(), &bmi, DIB_RGB_COLORS, SRCCOPY);
+    // 
+    // 
+    // 
+    // 
+    //SetDIBitsToDevice(pDC->GetSafeHdc(),
+    //    rect.left, rect.top, m_width, m_height,
+    //    0, 0, 0, m_height,
+    //    rgbData.data(), &bmi, DIB_RGB_COLORS);
+    // 
+    // 
+    // 
+    int oldStretchMode = pDC->SetStretchBltMode(HALFTONE);
+    pDC->SetBrushOrg(0, 0); // Required for HALFTONE mode
 
-    m_pd3dDevice->CreateShaderResourceView(m_pYUVTexture, &srvDesc, &m_pYUVTextureView);
+    // Calculate aspect ratio
+    float aspectRatio = static_cast<float>(m_width) / m_height;
+    int newWidth = rect.Width();
+    int newHeight = static_cast<int>(newWidth / aspectRatio);
 
-    delete[] buffer;
+    if (newHeight > rect.Height())
+    {
+        newHeight = rect.Height();
+        newWidth = static_cast<int>(newHeight * aspectRatio);
+    }
+
+    int offsetX = (rect.Width() - newWidth) / 2;
+    int offsetY = (rect.Height() - newHeight) / 2;
+
+    StretchDIBits(pDC->GetSafeHdc(),
+        rect.left + offsetX, rect.top + offsetY, newWidth, newHeight,
+        0, 0, m_width, m_height,
+        rgbData.data(), &bmi, DIB_RGB_COLORS, SRCCOPY);
+
+    // Restore the old stretching mode
+    pDC->SetStretchBltMode(oldStretchMode);
 }

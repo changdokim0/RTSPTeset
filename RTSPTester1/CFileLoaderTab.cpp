@@ -27,12 +27,15 @@ void CFileLoaderTab::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_EDIT_FILELOAD_SEEK, m_FileSeekTimeEdit);
 	DDX_Control(pDX, IDC_LIST_FILELOADER, m_listCtrl);
 	DDX_Control(pDX, IDC_STC_VIEWER, m_videoWnd);
+	DDX_Control(pDX, IDC_EDIT2, m_edt_box);
 }
 
 BEGIN_MESSAGE_MAP(CFileLoaderTab, CDialogEx)
 	ON_BN_CLICKED(IDC_BTN_FILELOADER_FILEOPEN, &CFileLoaderTab::OnBnClickedBtnFileloaderFileopen)
 	ON_BN_CLICKED(IDC_BTN_FILELOAD_SEEK, &CFileLoaderTab::OnBnClickedBtnFileloadSeek)
 	ON_BN_CLICKED(IDC_BUTTON1, &CFileLoaderTab::OnBnClickedButton1)
+	ON_NOTIFY(NM_CLICK, IDC_LIST_FILELOADER, &CFileLoaderTab::OnListItemClick)
+	ON_NOTIFY(LVN_ITEMCHANGED, IDC_LIST_FILELOADER, &CFileLoaderTab::OnListItemChanged)
 END_MESSAGE_MAP()
 
 
@@ -45,21 +48,128 @@ BOOL CFileLoaderTab::OnInitDialog()
 	HTREEITEM hChild1, hChild2;
 
 	m_listCtrl.SetExtendedStyle(LVS_EX_GRIDLINES | LVS_EX_FULLROWSELECT);
-	m_listCtrl.InsertColumn(LIST_ITEM_INDEX, _T("Index"), LVCFMT_LEFT, 50);
+	m_listCtrl.InsertColumn(LIST_ITEM_INDEX, _T("Index"), LVCFMT_LEFT, 40);
 	m_listCtrl.InsertColumn(LIST_ITEM_TYPE, _T("Type"), LVCFMT_LEFT, 50);
 	m_listCtrl.InsertColumn(LIST_ITEM_CODECTYPE, _T("CodecType"), LVCFMT_LEFT, 50);
-	m_listCtrl.InsertColumn(LIST_ITEM_FRAMETYPE, _T("FrameType"), LVCFMT_LEFT, 80);
+	m_listCtrl.InsertColumn(LIST_ITEM_FRAMETYPE, _T("FrameType"), LVCFMT_LEFT, 70);
+	m_listCtrl.InsertColumn(LIST_ITEM_FRMAESIZE, _T("size"), LVCFMT_LEFT, 80);
+	m_listCtrl.InsertColumn(LIST_ITEM_PACKETSIZE, _T("packetsize"), LVCFMT_LEFT, 60);
 	m_listCtrl.InsertColumn(LIST_ITEM_EPOCHTIME, _T("epoch time"), LVCFMT_LEFT, 100);
-	m_listCtrl.InsertColumn(LIST_ITEM_TIME, _T("time"), LVCFMT_LEFT, 180);
-	m_listCtrl.InsertColumn(LIST_ITEM_LOCALTIME, _T("Local time"), LVCFMT_LEFT, 180);
+	m_listCtrl.InsertColumn(LIST_ITEM_TIME, _T("time"), LVCFMT_LEFT, 160);
+	m_listCtrl.InsertColumn(LIST_ITEM_LOCALTIME, _T("Local time"), LVCFMT_LEFT, 160);
 
-	ffmpegWrapper.Initialize("h265");
+	ffmpegWrapper.Initialize(CODEC_TYPE::H264);
 
-	//int left = 1, top = 1, right = 1150, bottom = 400;
-	//m_videoWnd.Create(_T(""), WS_CHILD | WS_VISIBLE, CRect(left, top, right, bottom), this, 1);
-	//m_videoWnd.InitializeD3D(3840, 2160);
-	m_videoWnd.InitD3D(m_videoWnd.GetSafeHwnd());
 	return TRUE;  // return TRUE unless you set the focus to a control
+}
+
+void CFileLoaderTab::OnListItemClick(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	//HandleListItemSelection();
+	//*pResult = 0;
+}
+
+void CFileLoaderTab::OnListItemChanged(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	LPNMLISTVIEW pNMLV = reinterpret_cast<LPNMLISTVIEW>(pNMHDR);
+
+	// Check if the item is selected
+	if ((pNMLV->uNewState & LVIS_SELECTED) && !(pNMLV->uOldState & LVIS_SELECTED))
+	{
+		HandleListItemSelection();
+	}
+}
+
+
+void CFileLoaderTab::HandleListItemSelection()
+{
+	int selectedItem = m_listCtrl.GetSelectionMark();
+	bool search = false;
+	CODEC_TYPE codec_type;
+	if (selectedItem != -1)
+	{
+		YUVData yuvData; // YUVData 구조체
+		CString epochTimeStr = m_listCtrl.GetItemText(selectedItem, LIST_ITEM_EPOCHTIME);
+		CString datatypeStr = m_listCtrl.GetItemText(selectedItem, LIST_ITEM_TYPE);
+		long long epochTime = _ttoi64(epochTimeStr);
+
+		if (datatypeStr.Compare("Meta") == 0) {
+			for (int ind = 0; ind < buffers_all_.size(); ind++) {
+				auto buffers = buffers_all_[ind];
+				if (buffers.has_value())
+				{
+					for (auto item : *buffers)
+					{
+						if (item->timestamp_msec == epochTime && item->archive_type == kArchiveTypeMeta) {
+							if (auto meta = std::dynamic_pointer_cast<MetaData>(item)) {
+								CString strMeta;// (meta->buffer->data());
+								strMeta.Format(_T("%.*s"), meta->buffer->dataSize(), meta->buffer->data());
+								m_edt_box.Clear();
+								m_edt_box.SetWindowText(strMeta);
+								return;
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if (datatypeStr.Compare("Video") != 0)
+			return;
+
+		int bufferIndex = _ttoi(m_listCtrl.GetItemText(selectedItem, 0));
+		if (bufferIndex >= 0 )
+		{
+			int search_idx = 0;
+			for (int ind = 0; ind < buffers_all_.size(); ind++) {
+				auto buffers = buffers_all_[ind];
+				if (buffers.has_value()){
+					if (buffers->at(0)->timestamp_msec > epochTime)
+						break;
+
+					if (auto video = std::dynamic_pointer_cast<VideoData>(buffers->at(0))) {
+						if (video->archive_header.codecType == Pnx::Media::VideoCodecType::H265)
+							codec_type = CODEC_TYPE::H265;
+						else if (video->archive_header.codecType == Pnx::Media::VideoCodecType::H264)
+							codec_type = CODEC_TYPE::H264;
+						else
+							codec_type = CODEC_TYPE::Unknown;
+
+						if (video->archive_header.frameType == Pnx::Media::VideoFrameType::I_FRAME) {
+							search_idx = ind;
+						}
+					}
+
+				}
+			}
+
+			for (int ind = search_idx; ind < buffers_all_.size(); ind++) {
+				auto buffers = buffers_all_[ind];
+				if (buffers.has_value())
+				{
+					for (auto item : *buffers)
+					{
+						if (item->archive_type == kArchiveTypeFrameVideo)
+						{
+							if (ffmpegWrapper.GetCodecType() != codec_type) {
+								ffmpegWrapper.Cleanup();
+								ffmpegWrapper.Initialize(codec_type);
+							}
+							ffmpegWrapper.ReceiveFrame(item->buffer->data(), item->buffer->dataSize(), yuvData);
+							if (item->timestamp_msec == epochTime) {
+								search = true;
+								break;
+							}
+						}
+					}
+				}
+				if (search)
+					break;
+			}
+		}
+		ffmpegWrapper.GetFrame(yuvData);
+		m_videoWnd.LoadVideoFrame(yuvData.yData.get(), yuvData.uData.get(), yuvData.vData.get(), yuvData.width, yuvData.height);
+	}
 }
 
 void CFileLoaderTab::OnBnClickedBtnFileloaderFileopen()
@@ -92,16 +202,6 @@ void CFileLoaderTab::OpenFileLoad(CString filePath)
 		std::optional<std::vector<std::shared_ptr<StreamBuffer>>> buffers = read_object_.get()->GetNextData(ArchiveType::kArchiveTypeFrameVideo);
 		if (buffers != std::nullopt) {
 			buffers_all_.push_back(buffers);
-
-			///TEST
-			for (auto item : *buffers) {
-				item->buffer->data();
-				item->buffer->dataSize();
-				YUVData yuvData; // YUVData 구조체
-				ffmpegWrapper.ReceiveFrame(item->buffer->data(), item->buffer->dataSize(), yuvData);
-				//m_videoWnd.LoadVideoFrame(yuvData.yData.get(), yuvData.uData.get(), yuvData.vData.get(), yuvData.width, yuvData.height);
-			}
-			///TEST
 		}
 		else {
 			//LOG(AL_INFO, "");
@@ -153,6 +253,7 @@ void CFileLoaderTab::MakeTree() {
 		if (buffers.has_value() == false)
 			continue;
 
+		CString strFrameSize = _T(""), strPacketSize = _T("");
 		for (auto buffer : *buffers) {
 			CString type = GetTypeString(buffer->archive_type);
 			CString frame_Type = _T("");
@@ -171,7 +272,9 @@ void CFileLoaderTab::MakeTree() {
 					frame_Type = _T("P_FRAME");
 				else
 					frame_Type = _T("Unknown");
+				strFrameSize.Format(_T("%dx%d"), video->archive_header.width, video->archive_header.height);
 			}
+			strPacketSize.Format(_T("%d"), buffer->packet_size);
 			CString buffer_info;
 			buffer_info.Format("%s_%s_%s", type, codec_Type, frame_Type);
 
@@ -185,6 +288,8 @@ void CFileLoaderTab::MakeTree() {
 			m_listCtrl.SetItemText(list_col_Index, LIST_ITEM_TYPE,  type);
 			m_listCtrl.SetItemText(list_col_Index, LIST_ITEM_CODECTYPE, codec_Type);
 			m_listCtrl.SetItemText(list_col_Index, LIST_ITEM_FRAMETYPE, frame_Type);
+			m_listCtrl.SetItemText(list_col_Index, LIST_ITEM_FRMAESIZE, strFrameSize);
+			m_listCtrl.SetItemText(list_col_Index, LIST_ITEM_PACKETSIZE, strPacketSize);
 			m_listCtrl.SetItemText(list_col_Index, LIST_ITEM_EPOCHTIME, epochTime);
 			m_listCtrl.SetItemText(list_col_Index, LIST_ITEM_TIME, Time);
 			m_listCtrl.SetItemText(list_col_Index, LIST_ITEM_LOCALTIME, localTime);
@@ -232,6 +337,8 @@ void CFileLoaderTab::ConvertEpochToGMTAndLocalCString(long long epochTime, CStri
 
 void CFileLoaderTab::OnBnClickedBtnFileloadSeek()
 {
+	return;
+
 	CString strSeekTime;
 	m_FileSeekTimeEdit.GetWindowText(strSeekTime);
 	long long neekTime = _ttoll(strSeekTime);
@@ -244,6 +351,8 @@ void CFileLoaderTab::OnBnClickedBtnFileloadSeek()
 
 void CFileLoaderTab::OnBnClickedButton1()
 {
+	return;
+
 	CString strSeekTime;
 	m_FileSeekTimeEdit.GetWindowText(strSeekTime);
 	long long neekTime = _ttoll(strSeekTime);
@@ -252,10 +361,6 @@ void CFileLoaderTab::OnBnClickedButton1()
 	std::shared_ptr<ArchiveChunkBuffer> data = read_object_.get()->GetStreamGop(ArchiveChunkReadType::kArchiveChunkReadTarget);
 
 	std::optional<std::vector<std::shared_ptr<StreamBuffer>>> buffers = read_object_.get()->GetNextData(ArchiveType::kArchiveTypeFrameVideo);
-	//std::optional<std::vector<std::shared_ptr<StreamBuffer>>> buffers = read_object_.get()->GetNextData(ArchiveType::kArchiveTypeFrameVideo);
-	//std::optional<std::vector<std::shared_ptr<StreamBuffer>>> buffers = read_object_.get()->GetNextData(ArchiveType::kArchiveTypeFrameVideo);
-	//std::optional<std::vector<std::shared_ptr<StreamBuffer>>> buffers = read_object_.get()->GetNextData(ArchiveType::kArchiveTypeFrameVideo);
-	//std::optional<std::vector<std::shared_ptr<StreamBuffer>>> buffers = read_object_.get()->GetNextData(ArchiveType::kArchiveTypeFrameVideo);
 }
 
 
@@ -301,17 +406,20 @@ void CFileLoaderTab::CopyToClipboard() {
 }
 
 void CFileLoaderTab::PasteFromClipboard() {
-	//if (OpenClipboard()) {
-	//	HGLOBAL hGlob = GetClipboardData(CF_TEXT);
-	//	if (hGlob) {
-	//		TCHAR* pData = (TCHAR*)GlobalLock(hGlob);
-	//		if (pData) {
-	//			CString itemText(pData);
-	//			int newItemIndex = m_listCtrl.InsertItem(m_listCtrl.GetItemCount(), itemText);
-	//			m_listCtrl.SetItemText(newItemIndex, 0, itemText);
-	//			GlobalUnlock(hGlob);
-	//		}
-	//	}
-	//	CloseClipboard();
-	//}
+	if (m_edt_box.GetSafeHwnd() != ::GetFocus()) {
+		return; // 활성화된 컨트롤이 CListCtrl이 아닐 경우 반환
+	}
+	if (OpenClipboard()) {
+		HGLOBAL hGlob = GetClipboardData(CF_TEXT);
+		if (hGlob) {
+			TCHAR* pData = (TCHAR*)GlobalLock(hGlob);
+			if (pData) {
+				CString itemText(pData);
+				int newItemIndex = m_listCtrl.InsertItem(m_listCtrl.GetItemCount(), itemText);
+				m_listCtrl.SetItemText(newItemIndex, 0, itemText);
+				GlobalUnlock(hGlob);
+			}
+		}
+		CloseClipboard();
+	}
 }

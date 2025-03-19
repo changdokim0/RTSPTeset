@@ -26,19 +26,38 @@ struct YUVData {
     int vSize; // V plane size
 };
 
+enum CODEC_TYPE {
+	H264,
+	H265,
+	MPEG4,
+	VP8,
+	VP9,
+	AV1,
+	GIF,
+    Unknown
+};
+
 class FFmpegWrapper {
 public:
     FFmpegWrapper();
     ~FFmpegWrapper();
 
 
-    bool Initialize(const char* codecName);
+    bool Initialize(CODEC_TYPE codec_type);
     bool ReceiveFrame(uint8_t* data, int size, YUVData& yuvData);
     void Cleanup();
+	CODEC_TYPE GetCodecType() { return codecType; }
+    bool GetFrame(YUVData& yuvData);
 
 private:
     AVCodecContext* codecContext;
     AVCodec* codec;
     AVPacket* packet;
     AVFrame* frame;
+    AVBufferRef* hw_device_ctx;
+	CODEC_TYPE codecType;
+	AVFrame* sw_frame = nullptr;
+
+    bool InitHWDecoder(AVCodecContext* ctx, const enum AVHWDeviceType type);
+    static enum AVPixelFormat GetHWFormat(AVCodecContext* ctx, const enum AVPixelFormat* pix_fmts);
 };

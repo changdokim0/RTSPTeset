@@ -13,9 +13,11 @@
 #define LIST_ITEM_TYPE		1
 #define LIST_ITEM_CODECTYPE		2
 #define LIST_ITEM_FRAMETYPE		3
-#define LIST_ITEM_EPOCHTIME		4
-#define LIST_ITEM_TIME			5
-#define LIST_ITEM_LOCALTIME			6
+#define LIST_ITEM_FRMAESIZE		4
+#define LIST_ITEM_PACKETSIZE	5
+#define LIST_ITEM_EPOCHTIME		6
+#define LIST_ITEM_TIME			7
+#define LIST_ITEM_LOCALTIME		8
 
 class CFileLoaderTab : public CDialogEx
 {
@@ -36,7 +38,7 @@ protected:
 	DECLARE_MESSAGE_MAP()
 
 	CString strPathIni;
-	CMyVideoWnd m_videoWnd;
+	CustomPictureControl m_videoWnd;
 	FFmpegWrapper ffmpegWrapper;
 	//ReaderWorker reader_worker_;
 	std::shared_ptr<ReaderObject> read_object_;
@@ -50,14 +52,21 @@ protected:
 	void ConvertEpochToGMTAndLocalCString(long long epochTime, CString& gmtStr, CString& localStr);
 public:
 	virtual BOOL OnInitDialog();
-	afx_msg void OnBnClickedBtnFileloaderFileopen();
+
 	CEdit m_FileSelectPath;
+	int m_prevSelectedItem = -1;
 
 	void OpenFileLoad(CString filePath);
-	afx_msg void OnBnClickedBtnFileloadSeek();
 	CListCtrl m_listCtrl;
-	afx_msg void OnBnClickedButton1();
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	void CopyToClipboard();
 	void PasteFromClipboard();
+	void HandleListItemSelection();
+
+	afx_msg void OnBnClickedBtnFileloaderFileopen();
+	afx_msg void OnBnClickedBtnFileloadSeek();
+	afx_msg void OnBnClickedButton1();
+	afx_msg void OnListItemClick(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void OnListItemChanged(NMHDR* pNMHDR, LRESULT* pResult);
+	CEdit m_edt_box;
 };

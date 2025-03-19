@@ -122,12 +122,11 @@ BOOL CRTSPTester1Dlg::OnInitDialog()
 	RtspReceiver = new CRtspReceiver();
 	RtspReceiver->Create(IDD_DLG_RTSP_RECV_DIALOG, &m_tabCtrl);
 	RtspReceiver->MoveWindow(0, 20, rect.Width(), rect.Height());
-	RtspReceiver->ShowWindow(SW_SHOW);
-
+	RtspReceiver->ShowWindow(SW_HIDE);
 	FileLoaderTab = new CFileLoaderTab();
 	FileLoaderTab->Create(IDD_DLG_FILELOADER_DIALOG, &m_tabCtrl);
 	FileLoaderTab->MoveWindow(0, 20, rect.Width(), rect.Height());
-	FileLoaderTab->ShowWindow(SW_HIDE);
+	FileLoaderTab->ShowWindow(SW_SHOW);
 
 	return TRUE;  // 포커스를 컨트롤에 설정하지 않으면 TRUE를 반환합니다.
 }
@@ -189,12 +188,12 @@ void CRTSPTester1Dlg::OnTcnSelchangeTab(NMHDR* pNMHDR, LRESULT* pResult)
 	switch (sel)
 	{
 	case 0:
-		RtspReceiver->ShowWindow(SW_SHOW);
-		FileLoaderTab->ShowWindow(SW_HIDE);
-		break;
-	case 1:
 		RtspReceiver->ShowWindow(SW_HIDE);
 		FileLoaderTab->ShowWindow(SW_SHOW);
+		break;
+	case 1:
+		RtspReceiver->ShowWindow(SW_SHOW);
+		FileLoaderTab->ShowWindow(SW_HIDE);
 		break;
 	}
 

@@ -1,35 +1,27 @@
 #pragma once
-#define _CRT_SECURE_NO_WARNINGS
-#include "afxdialogex.h"
-#include <d3d11.h>
-#include <d3dcompiler.h>
-#include <DirectXMath.h>
 
-class CMyVideoWnd : public CStatic
+#include <memory>
+#include <vector>
+#include <afxwin.h>
+
+class CustomPictureControl : public CStatic
 {
 public:
-    CMyVideoWnd();
-    virtual ~CMyVideoWnd();
+    CustomPictureControl();
+    virtual ~CustomPictureControl();
 
-    void LoadYUV420Texture(const char* yuvFilePath, int width, int height);
-    void InitD3D(HWND hWnd);
+    void LoadVideoFrame(const uint8_t* yData, const uint8_t* uData, const uint8_t* vData, int width, int height);
+
 protected:
-    //virtual void PreSubclassWindow();
-    afx_msg void OnPaint();
     DECLARE_MESSAGE_MAP()
+    afx_msg void OnPaint();
 
 private:
-    ID3D11Device* m_pd3dDevice;
-    ID3D11DeviceContext* m_pImmediateContext;
-    IDXGISwapChain* m_pSwapChain;
-    ID3D11RenderTargetView* m_pRenderTargetView;
-    ID3D11Texture2D* m_pYUVTexture;
-    ID3D11ShaderResourceView* m_pYUVTextureView;
-    ID3D11SamplerState* m_pSamplerLinear;
-    ID3D11VertexShader* m_pVertexShader;
-    ID3D11PixelShader* m_pPixelShader;
-    ID3D11InputLayout* m_pVertexLayout;
+    void DrawYUV(CDC* pDC);
 
-    void CleanupD3D();
-    void Render();
+    std::vector<uint8_t> m_yData;
+    std::vector<uint8_t> m_uData;
+    std::vector<uint8_t> m_vData;
+    int m_width;
+    int m_height;
 };
