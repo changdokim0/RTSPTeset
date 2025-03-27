@@ -131,6 +131,7 @@ BOOL CRTSPTester1Dlg::OnInitDialog()
 	return TRUE;  // 포커스를 컨트롤에 설정하지 않으면 TRUE를 반환합니다.
 }
 
+
 void CRTSPTester1Dlg::OnSysCommand(UINT nID, LPARAM lParam)
 {
 	if ((nID & 0xFFF0) == IDM_ABOUTBOX)
@@ -180,6 +181,16 @@ HCURSOR CRTSPTester1Dlg::OnQueryDragIcon()
 	return static_cast<HCURSOR>(m_hIcon);
 }
 
+BOOL CRTSPTester1Dlg::PreTranslateMessage(MSG* pMsg)
+{
+	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_RETURN)
+	{
+		// 엔터 키 입력을 무시
+		return TRUE;
+	}
+
+	return CDialogEx::PreTranslateMessage(pMsg);
+}
 void CRTSPTester1Dlg::OnTcnSelchangeTab(NMHDR* pNMHDR, LRESULT* pResult)
 {
 	int sel = m_tabCtrl.GetCurSel();

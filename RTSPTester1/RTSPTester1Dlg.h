@@ -42,7 +42,7 @@ public:
 	afx_msg void OnTcnSelchangeTab(NMHDR* pNMHDR, LRESULT* pResult);
 	//void SendTest(HWND hwnd);
 	//void PostTest(HWND hwnd);
-
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 	CEdit m_Edt_ServerPort;
 

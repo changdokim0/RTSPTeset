@@ -34,7 +34,6 @@ BEGIN_MESSAGE_MAP(CFileLoaderTab, CDialogEx)
 	ON_BN_CLICKED(IDC_BTN_FILELOADER_FILEOPEN, &CFileLoaderTab::OnBnClickedBtnFileloaderFileopen)
 	ON_BN_CLICKED(IDC_BTN_FILELOAD_SEEK, &CFileLoaderTab::OnBnClickedBtnFileloadSeek)
 	ON_BN_CLICKED(IDC_BUTTON1, &CFileLoaderTab::OnBnClickedButton1)
-	ON_NOTIFY(NM_CLICK, IDC_LIST_FILELOADER, &CFileLoaderTab::OnListItemClick)
 	ON_NOTIFY(LVN_ITEMCHANGED, IDC_LIST_FILELOADER, &CFileLoaderTab::OnListItemChanged)
 END_MESSAGE_MAP()
 
@@ -63,12 +62,6 @@ BOOL CFileLoaderTab::OnInitDialog()
 	return TRUE;  // return TRUE unless you set the focus to a control
 }
 
-void CFileLoaderTab::OnListItemClick(NMHDR* pNMHDR, LRESULT* pResult)
-{
-	//HandleListItemSelection();
-	//*pResult = 0;
-}
-
 void CFileLoaderTab::OnListItemChanged(NMHDR* pNMHDR, LRESULT* pResult)
 {
 	LPNMLISTVIEW pNMLV = reinterpret_cast<LPNMLISTVIEW>(pNMHDR);
@@ -83,8 +76,9 @@ void CFileLoaderTab::OnListItemChanged(NMHDR* pNMHDR, LRESULT* pResult)
 
 void CFileLoaderTab::HandleListItemSelection()
 {
-	int selectedItem = m_listCtrl.GetSelectionMark();
+	int selectedItem = m_listCtrl.GetNextItem(-1, LVNI_SELECTED);
 	bool search = false;
+	m_edt_box.SetWindowText(_T(""));
 	CODEC_TYPE codec_type;
 	if (selectedItem != -1)
 	{
@@ -104,7 +98,7 @@ void CFileLoaderTab::HandleListItemSelection()
 							if (auto meta = std::dynamic_pointer_cast<MetaData>(item)) {
 								CString strMeta;// (meta->buffer->data());
 								strMeta.Format(_T("%.*s"), meta->buffer->dataSize(), meta->buffer->data());
-								m_edt_box.Clear();
+								m_edt_box.SetWindowText(_T(""));
 								m_edt_box.SetWindowText(strMeta);
 								return;
 							}
@@ -365,6 +359,10 @@ void CFileLoaderTab::OnBnClickedButton1()
 
 
 BOOL CFileLoaderTab::PreTranslateMessage(MSG* pMsg) {
+	if (pMsg->wParam == VK_RETURN)
+	{
+		return TRUE;
+	}
 	if (pMsg->message == WM_KEYDOWN) {
 		// Ctrl+C 처리
 		if (pMsg->wParam == 'C' && GetKeyState(VK_CONTROL) < 0) {

@@ -66,7 +66,6 @@ public:
 	afx_msg void OnBnClickedBtnFileloaderFileopen();
 	afx_msg void OnBnClickedBtnFileloadSeek();
 	afx_msg void OnBnClickedButton1();
-	afx_msg void OnListItemClick(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnListItemChanged(NMHDR* pNMHDR, LRESULT* pResult);
 	CEdit m_edt_box;
 };
