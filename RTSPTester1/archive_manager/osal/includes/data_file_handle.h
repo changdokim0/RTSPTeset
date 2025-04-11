@@ -49,11 +49,13 @@ class DataFileHandle {
     if (writebuffer == nullptr) {
       std::cerr << "Failed to allocate memory : " << GetLastError() << std::endl;
       writebuffer = nullptr;
+      return;
     }
 #else
     if (posix_memalign((void**)&writebuffer, g_dio_page_size_, dio_memory_size) != 0) {
       std::cout << "Failed to allocate memory ";
       writebuffer = nullptr;
+      return;
     }
 #endif
     memset(writebuffer, 0, dio_memory_size);

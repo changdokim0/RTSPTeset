@@ -33,14 +33,13 @@
 
 #ifdef _WIN32
 #ifdef ARCHIVE_MANAGER_EXPORTS
-#define ARCHIVE_MANAGER_API
+#define ARCHIVE_MANAGER_API __declspec(dllexport)
 #else
-#define ARCHIVE_MANAGER_API
+#define ARCHIVE_MANAGER_API __declspec(dllimport)
 #endif
 #else
 #define ARCHIVE_MANAGER_API
 #endif
-
 
 #define _CRT_SECURE_NO_WARNINGS
 
@@ -67,6 +66,7 @@ enum ArchiveType {
   kArchiveTypeFrameVideo,
   kArchiveTypeAudio,
   kArchiveTypeMeta,
+  kArchiveTypeFlush,
 };
 
 enum ReadFrameType {
@@ -110,11 +110,11 @@ extern int g_dio_indexer_size_;
 // define param's
 ///////////////////////////////////////
 
-#define IOWORKER_QUEUE_MAX_COUNT		10
-#define ARCHIVER_BUFFER_MEMORY_PERCENT 70
-#define ARCHIVER_SIMULATION_DELETE_TIME 7200 // 2 hour
-#define ARCHIVER_VERSOIN 0001
-#define SAVED_TIME 600
+#define IOWORKER_QUEUE_MAX_COUNT			10
+#define ARCHIVER_BUFFER_MEMORY_PERCENT		70
+#define ARCHIVER_SIMULATION_DELETE_TIME		7200 // 2 hour
+#define ARCHIVER_VERSOIN					0001
+#define SAVED_TIME							600
 
 
 ///////////////////////////////////////

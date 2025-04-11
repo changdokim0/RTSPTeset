@@ -40,7 +40,7 @@ protected:
 	CString strPathIni;
 	CustomPictureControl m_videoWnd;
 	FFmpegWrapper ffmpegWrapper;
-	//ReaderWorker reader_worker_;
+	ReaderWorker reader_worker_;
 	std::shared_ptr<ReaderObject> read_object_;
 	std::vector<std::optional<std::vector<std::shared_ptr<StreamBuffer>>>> buffers_all_;
 	CEdit m_FileSeekTimeEdit;
@@ -62,6 +62,7 @@ public:
 	void CopyToClipboard();
 	void PasteFromClipboard();
 	void HandleListItemSelection();
+	std::string formatTimestamp(long long timestampMs);
 
 	afx_msg void OnBnClickedBtnFileloaderFileopen();
 	afx_msg void OnBnClickedBtnFileloadSeek();

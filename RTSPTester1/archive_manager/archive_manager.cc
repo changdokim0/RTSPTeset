@@ -86,6 +86,7 @@ bool ArchiveManager::DeleteStream(SessionID session_id, MediaProfile profile) {
       return false;
     }
     workerptr = archive_workers[device_session_index[stream_id]];
+    device_session_index.erase(stream_id);
   }
   if (workerptr == nullptr)
     return false;
@@ -117,12 +118,17 @@ void ArchiveManager::SetSavePath(std::filesystem::path save_path) {
 
 
 bool ArchiveManager::PushDataGroup(std::shared_ptr<PnxMediaArchiveDataGroup> data_group) {
-  if (data_group == nullptr && data_group->GetNumber() <= 0)
+  if (data_group == nullptr || data_group->GetNumber() <= 0)
     return false;
 
   // TODO cd.kim temp code begin
-  data_group->channel_uuid = data_group->GetFirstMediaData()->channel_uuid;
-  MediaProfile profile = data_group->GetFirstMediaData()->profile;
+  auto first_media_data = data_group->GetFirstMediaData();
+  if (nullptr == first_media_data) {
+    SPDLOG_ERROR("[ArchiveL][{0}] ArchiveManager - Fail : first media data is null", __func__);
+    return false;
+  }
+  data_group->channel_uuid = first_media_data->channel_uuid;
+  MediaProfile profile = first_media_data->profile;
   // TODO cd.kim temp code end
 
   std::string session_id = GetStreamID(data_group->channel_uuid, profile);
@@ -193,7 +199,11 @@ bool ArchiveManager::SetDataEncryption(SessionID session_id, MediaProfile profil
       return false;
     }
     workerptr = archive_workers[device_session_index[stream_id]];
-    workerptr->SetDataEncryption(session_id, profile, encrytion_type);
+    if (nullptr != workerptr) {
+      workerptr->SetDataEncryption(session_id, profile, encrytion_type);
+    } else {
+      SPDLOG_ERROR("[ArchiveL][{0}] ArchiveManager - Fail : workerptr is null", __func__);
+    }
   }
   if (workerptr == nullptr)
     return false;
@@ -308,8 +318,11 @@ void ArchiveManager::CallbackWirteStatusAWTAM(SessionID session_id, MediaProfile
 
   std::string stream_id = GetStreamID(session_id, profile);
 
-  SPDLOG_INFO("ArchiveManager - Write Result channel[{}], profile[{}], success[{}], begintime[{}], endtime[{}]", session_id.c_str(), profile.ToString(), success,
-                list->at(0).packet_timestamp_msec, list->at(list->size() - 1).packet_timestamp_msec);
+  PnxMediaTime start_time;
+  PnxMediaTime end_time;
+  start_time.FromMilliSeconds(list->at(0).packet_timestamp_msec);
+  end_time.FromMilliSeconds(list->at(list->size() - 1).packet_timestamp_msec);
+  SPDLOG_INFO("ArchiveManager - Write Result channel[{}], profile[{}], success[{}], begintime[{}], endtime[{}]", session_id.c_str(), profile.ToString(), success, start_time.ToLocalTimeString(), end_time.ToLocalTimeString());
 
   std::shared_lock<std::shared_mutex> lock(callback_mtx); //shared lock
   if (stream_id.empty())

@@ -62,33 +62,29 @@ bool IOWorker::PushVideoChunkBuffer(std::filesystem::path save_driver, std::shar
   DoEncryption(media_datas);
   {
     if (save_driver_.string().find(save_driver.string()) == std::string::npos) {
-      if (!save_driver_.empty())
+      if (!save_driver_.empty()) {
         change_file_ = true;
-
+      }
       save_driver_ = save_driver;
     }
     {
       std::unique_lock<std::shared_mutex> lock(media_buffer_mtx_);
       media_buffers.push(media_datas);
     }
+    MemoryCheck();
     QueueCheck();
   }
+  //printf("[%s]session[%s]stream[%s]profile[%s] save_driver_[%s]\n", __FUNCTION__, session_id_.c_str(), stream_id_.c_str(), profile_.ToString().c_str(), save_driver_.string().c_str());
   return true;
 }
 
 bool IOWorker::ProcessBuffer(unsigned int current_time) {
-
-  MemoryCheck();
 
   while (true) {
     if (file_handle != InvalidHandle && file_write_timestamp_ != 0 && std::abs((int)current_time - (int)file_write_timestamp_) > SAVED_TIME ) {
       SPDLOG_INFO("[ArchiveL] File write time exceeded. close file. [{}]", write_file_name_.c_str());
       CloseSavedFile();
       file_write_timestamp_ = 0;
-    }
-    if (reserve_flush_) {
-      reserve_flush_ = false;
-      ProcessFlush();
     }
 
     std::shared_ptr<BaseBuffer> base_data = nullptr;
@@ -104,6 +100,13 @@ bool IOWorker::ProcessBuffer(unsigned int current_time) {
     if (base_data == nullptr)
       return false;
 
+    if (auto t_buffer = std::dynamic_pointer_cast<StreamBuffer>(base_data)) {
+      if (t_buffer->archive_type == kArchiveTypeFlush) {
+        ProcessFlush();
+        continue;
+      }
+    }
+
     if (auto gop_buffers = std::dynamic_pointer_cast<ArchiveChunkBuffer>(base_data)) {
       if (!ProcessChunkBuffers(gop_buffers)) {
         return false;
@@ -115,14 +118,15 @@ bool IOWorker::ProcessBuffer(unsigned int current_time) {
 
 bool IOWorker::ProcessChunkBuffers(std::shared_ptr<ArchiveChunkBuffer> gop_buffers) {
   if (!UpdateFileNameByCondition(file_handle, gop_buffers->GetChunkBeginTime())) {
-    CallbackWirteStatusIWTAW(session_id_, profile_, false, gop_buffers->GetFrameInfos());
+    SPDLOG_ERROR("[ArchiveL] [{}][{}]{}] UpdateFileNameByCondition error", session_id_, stream_id_, profile_.ToString());
+    CallbackWirteStatusIWTAW(session_id_, profile_, false, gop_buffers->GetFrameInfos(save_driver_.string()));
     index_buffer_info_.Clear();
     return false;
   }
   if (!WriteIndexInfo(kArchiveTypeGopVideo, gop_buffers->GetChunkTotalSize(), gop_buffers->GetChunkBeginTime(), gop_buffers->GetChunkEndTime(),
                       gop_buffers->GetEncryptionType())) {
-    SPDLOG_ERROR("[ArchiveL] WriteIndexInfo error");
-    CallbackWirteStatusIWTAW(session_id_, profile_, false, gop_buffers->GetFrameInfos());
+    SPDLOG_ERROR("[ArchiveL] [{}][{}][{}] WriteIndexInfo error", session_id_, stream_id_, profile_.ToString());
+    CallbackWirteStatusIWTAW(session_id_, profile_, false, gop_buffers->GetFrameInfos(save_driver_.string()));
     index_buffer_info_.Clear();
     return false;
   }
@@ -143,6 +147,7 @@ bool IOWorker::ProcessChunkBuffers(std::shared_ptr<ArchiveChunkBuffer> gop_buffe
       continue;
 
     if (!WriteBufferToDisk(buffer->buffer)) {
+      SPDLOG_ERROR("[ArchiveL] [{}][{}][{}] WriteBufferToDisk failed", session_id_, stream_id_, profile_.ToString());
       fail = true;
       continue;
     }
@@ -208,6 +213,11 @@ bool IOWorker::WriteBlockInfo(std::shared_ptr<BaseBuffer> base_buffer) {
 
 bool IOWorker::WriteBufferToDisk(Pnx::Media::MediaSourceFramePtr buffer_data) {
   int remain__space = write_file_data_handle_->dio_buffer_size_ - write_file_data_handle_->buffer_pos;
+  if (remain__space <= 0) {
+    SPDLOG_ERROR("[ArchiveL] size of remain__space is negative. remain__space[{}]", remain__space);
+    return false;
+  }
+
   if (remain__space > buffer_data->dataSize()) {
     memcpy(write_file_data_handle_->writebuffer + write_file_data_handle_->buffer_pos, buffer_data->data(), buffer_data->dataSize());
 
@@ -221,7 +231,7 @@ bool IOWorker::WriteBufferToDisk(Pnx::Media::MediaSourceFramePtr buffer_data) {
     }
     {
       std::unique_lock<std::mutex> lock(mmy_buf_mtx_);
-      if (memory_buffer_frames.size() > buffer_size_) {
+      if (memory_buffer_frames.size() > 10) {
 
         auto buffer = *memory_buffer_frames.begin();
         for (auto data : memory_buffer_frames) {
@@ -414,7 +424,7 @@ int IOWorker::GetRandomFileNumber() {
 void IOWorker::WriteDiskSuccess() {
   // Success
   write_file_data_handle_->buffer_pos = 0;
-  std::shared_ptr<std::vector<FrameWriteIndexData>> frameinfos = index_buffer_info_.GetFrameInfos();
+  std::shared_ptr<std::vector<FrameWriteIndexData>> frameinfos = index_buffer_info_.GetFrameInfos(save_driver_.string());
   CallbackWirteStatusIWTAW(session_id_, profile_, true, frameinfos);
   index_buffer_info_.ResetInfo();
   write_time_ = std::chrono::high_resolution_clock::now();
@@ -442,7 +452,7 @@ void IOWorker::WriteDiskFail() {
 
   // fail
   write_file_data_handle_->buffer_pos = 0;
-  std::shared_ptr<std::vector<FrameWriteIndexData>> frameinfos = index_buffer_info_.GetFrameInfos();
+  std::shared_ptr<std::vector<FrameWriteIndexData>> frameinfos = index_buffer_info_.GetFrameInfos(save_driver_.string());
   CallbackWirteStatusIWTAW(session_id_, profile_, false, frameinfos);
   index_buffer_info_.Clear();
 }
@@ -523,7 +533,7 @@ void IOWorker::QueueCheck() {
         if (buffer == nullptr)
           break;
 
-        FrameWriteIndexData index_data = {buffer.get()->archive_type, buffer.get()->timestamp_msec};
+        FrameWriteIndexData index_data = {buffer.get()->archive_type, buffer.get()->timestamp_msec, save_driver_.string()};
         frameinfos->push_back(index_data);
       }
     }
@@ -605,17 +615,19 @@ bool IOWorker::DoEncryption(std::shared_ptr<ArchiveChunkBuffer> media_datas) {
   return true;
 }
 
+void IOWorker::Flush() {
+  SPDLOG_INFO("[ArchiveL--] PushVideoChunkBuffer stream_id_[{}] ProcessFlush() 0 ", stream_id_.c_str());
+  std::shared_ptr<StreamBuffer> flush_datas = std::make_shared<StreamBuffer>();
+  flush_datas->archive_type = kArchiveTypeFlush;
+
+  std::unique_lock<std::shared_mutex> lock(media_buffer_mtx_);
+  media_buffers.push(flush_datas);
+
+}
+
 void IOWorker::ProcessFlush() {
-  std::shared_ptr<BaseBuffer> base_data = nullptr;
 
-  media_buffer_mtx_.lock();
-  while (true) {
-    if (media_buffers.empty())
-      break;
-
-    media_buffers.pop();
-  }
-  media_buffer_mtx_.unlock();
+  SPDLOG_INFO("[ArchiveL--] PushVideoChunkBuffer stream_id_[{}] ProcessFlush() 2, buffersize[{}]", stream_id_.c_str(), media_buffers.size());
   FileClose();
   index_buffer_info_.Clear();
 }

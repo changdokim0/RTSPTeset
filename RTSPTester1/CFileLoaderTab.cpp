@@ -188,7 +188,7 @@ void CFileLoaderTab::OpenFileLoad(CString filePath)
 	CStringA filePathA(filePath);
 	std::string stdFilePath(filePathA.GetString());
 	buffers_all_.clear();
-	read_object_ = std::make_shared<ReaderObject>(MediaProfile::kPrimary);
+	read_object_ = std::make_shared<ReaderObject>(MediaProfile::kSecondary);
 	read_object_->FileOpen(stdFilePath);
 	read_object_.get()->ParseMainHeader();
 	read_object_.get()->LoadDataByIndex(0, ArchiveReadType::kArchiveReadNext);
@@ -329,32 +329,72 @@ void CFileLoaderTab::ConvertEpochToGMTAndLocalCString(long long epochTime, CStri
 		milliseconds); // 밀리세컨드 추가
 }
 
+std::string CFileLoaderTab::formatTimestamp(long long timestampMs) {
+	// 밀리초를 초로 변환
+	std::chrono::milliseconds ms(timestampMs);
+
+	// epoch 기준으로부터의 시간 계산
+	auto timePoint = std::chrono::time_point<std::chrono::system_clock>(ms);
+
+	// std::time_t 형식으로 변환
+	std::time_t timeT = std::chrono::system_clock::to_time_t(timePoint);
+
+	// std::tm 구조체 생성
+	std::tm localTime;
+
+	// localtime_s를 사용하여 로컬 시간으로 변환
+	localtime_s(&localTime, &timeT);
+
+	// 밀리초를 계산
+	auto milliseconds = ms.count() % 1000;
+
+	// 문자열 스트림을 사용하여 형식화된 시간 문자열 생성
+	std::ostringstream oss;
+	oss << std::put_time(&localTime, "%Y-%m-%d %H:%M:%S") << '.'
+		<< std::setw(3) << std::setfill('0') << milliseconds;
+
+	return oss.str(); // 형식화된 문자열 반환
+}
+
 void CFileLoaderTab::OnBnClickedBtnFileloadSeek()
 {
-	return;
-
+	//m_FileSeekTimeEdit.SetWindowText("1743740937080");
+	m_FileSeekTimeEdit.SetWindowText("1743740410123");
+	//return;
+	ArchiveReadType archive_read_type = kArchiveReadNext;
+	std::string channel = "132";
 	CString strSeekTime;
 	m_FileSeekTimeEdit.GetWindowText(strSeekTime);
-	long long neekTime = _ttoll(strSeekTime);
-	bool ret = read_object_.get()->LoadDataByIndex(neekTime, ArchiveReadType::kArchiveReadPrev);
+	long long seekTime = _ttoll(strSeekTime);
+	std::shared_ptr<ReaderObject> read_object = std::make_shared<ReaderObject>(MediaProfile::kSecondary);
+	bool ret = reader_worker_.Seek(channel, seekTime, archive_read_type, read_object);
 
-	std::shared_ptr<ArchiveChunkBuffer>  stream_chunk = read_object_->GetStreamChunk();
-	//LOG(AL_INFO, "%d", 4);
+	for (int i = 0; i < 1000; i++) {
+		std::shared_ptr<ArchiveChunkBuffer> gops = reader_worker_.GetStreamGop(kArchiveChunkReadFull, read_object);
+		auto duration1 = formatTimestamp(gops->GetChunkBeginTime());
+		auto duration2 = formatTimestamp(gops->GetChunkEndTime());
+		std::optional<std::vector<std::shared_ptr<StreamBuffer>>> frame = reader_worker_.GetNextData(kArchiveTypeFrameVideo, read_object);
+		auto duration3 = formatTimestamp(frame->at(0)->timestamp_msec);
+	}
+	return;
 }
 
 
 void CFileLoaderTab::OnBnClickedButton1()
 {
-	return;
+	//return;
 
-	CString strSeekTime;
-	m_FileSeekTimeEdit.GetWindowText(strSeekTime);
-	long long neekTime = _ttoll(strSeekTime);
-	read_object_.get()->LoadDataByIndex(neekTime, ArchiveReadType::kArchiveReadNext);
+	//CString strSeekTime;
+	//m_FileSeekTimeEdit.GetWindowText(strSeekTime);
+	//long long neekTime = _ttoll(strSeekTime);
+	//read_object_.get()->LoadDataByIndex(neekTime, ArchiveReadType::kArchiveReadNext);
 
-	std::shared_ptr<ArchiveChunkBuffer> data = read_object_.get()->GetStreamGop(ArchiveChunkReadType::kArchiveChunkReadTarget);
+	//std::shared_ptr<ArchiveChunkBuffer> data = read_object_.get()->GetStreamGop(ArchiveChunkReadType::kArchiveChunkReadTarget);
 
-	std::optional<std::vector<std::shared_ptr<StreamBuffer>>> buffers = read_object_.get()->GetNextData(ArchiveType::kArchiveTypeFrameVideo);
+	//std::optional<std::vector<std::shared_ptr<StreamBuffer>>> buffers = read_object_.get()->GetNextData(ArchiveType::kArchiveTypeFrameVideo);
+	reader_worker_.SetData("/Hanwha Vision/BLAZE server/Archive/cd.kim");
+	reader_worker_.AddDrive("C:");
+	reader_worker_.AddDrive("D:");
 }
 
 
@@ -398,8 +438,8 @@ void CFileLoaderTab::CopyToClipboard() {
 				memcpy(hGlob, itemText.GetString(), (itemText.GetLength() + 1) * sizeof(TCHAR));
 				SetClipboardData(CF_TEXT, hGlob);
 			}
-			CloseClipboard();
 		}
+			CloseClipboard();
 	}
 }
 

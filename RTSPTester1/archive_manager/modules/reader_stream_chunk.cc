@@ -259,11 +259,29 @@ bool ReaderStreamChunk::IsInGOP(const PnxMediaTime& time) {
   if(first_video_frame == nullptr) {
 	return false;
   }
-
   float gap_between_frames = 1 / first_video_frame->archive_header.fps;
-  unsigned long long start_time = datas_[0]->timestamp_msec;
-  unsigned long long end_time = datas_[datas_.size() - 1]->timestamp_msec + gap_between_frames;
-  if (time.ToMilliSeconds() >= start_time && time.ToMilliSeconds() <= end_time) {
+  int frame_duration_msec = (int)(gap_between_frames * 1000);
+  unsigned long long start_time_msec = 0;
+  unsigned long long end_time_msec = 0;
+  if (datas_[0]->archive_type != kArchiveTypeFrameVideo) {
+    SPDLOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
+    SPDLOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
+    SPDLOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
+    SPDLOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
+    SPDLOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
+    SPDLOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
+    SPDLOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
+    return false;
+  } else {
+    start_time_msec = datas_[0]->timestamp_msec;
+  }
+  for (int i = 0; i < datas_.size(); i ++) {
+    if (datas_[i]->archive_type == kArchiveTypeFrameVideo) {
+      end_time_msec = datas_[i]->timestamp_msec;
+    }
+  }
+  end_time_msec += frame_duration_msec;
+  if (time.ToMilliSeconds() >= start_time_msec && time.ToMilliSeconds() <= end_time_msec) {
     return true;
   }
   return false;

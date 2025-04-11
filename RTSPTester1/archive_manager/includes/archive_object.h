@@ -76,15 +76,18 @@ class ARCHIVE_MANAGER_API VideoData : public StreamBuffer {
  private:
   void _CopyFromPnxMediaData(PnxMediaData* pnx_media_data) {
     StreamBuffer::_CopyFromPnxMediaData(pnx_media_data);
-    auto video = std::dynamic_pointer_cast<Pnx::Media::VideoSourceFrame>(pnx_media_data->data);
-    archive_header.packet_size = pnx_media_data->data->dataSize();
-    archive_header.packet_timestamp_msec = pnx_media_data->time_info.ToMilliSeconds();
-    archive_header.fps = video->frameRate;
-    archive_header.codecType = video->codecType;
-    archive_header.frameType = video->frameType;
-    archive_header.height = video->resolution.height;
-    archive_header.width = video->resolution.width;
-    archive_type = kArchiveTypeFrameVideo;
+    if (auto video = std::dynamic_pointer_cast<Pnx::Media::VideoSourceFrame>(pnx_media_data->data); video) {
+      archive_header.packet_size = pnx_media_data->data->dataSize();
+      archive_header.packet_timestamp_msec = pnx_media_data->time_info.ToMilliSeconds();
+      archive_header.fps = video->frameRate;
+      archive_header.codecType = video->codecType;
+      archive_header.frameType = video->frameType;
+      archive_header.height = video->resolution.height;
+      archive_header.width = video->resolution.width;
+      archive_type = kArchiveTypeFrameVideo;
+    } else {
+      std::cerr << "Failed to get video source frame during copy process" << std::endl;
+    }
   }
 };
 
@@ -101,15 +104,18 @@ class ARCHIVE_MANAGER_API AudioData : public StreamBuffer {
   }
   void _CopyFromPnxMediaData(PnxMediaData* pnx_media_data) {
     StreamBuffer::_CopyFromPnxMediaData(pnx_media_data);
-    auto audio = std::dynamic_pointer_cast<Pnx::Media::AudioSourceFrame>(pnx_media_data->data);
-    archive_header.codecType = audio->codecType;
-    archive_header.packet_size = pnx_media_data->data->dataSize();
-    archive_header.packet_timestamp_msec = pnx_media_data->time_info.ToMilliSeconds();
-    archive_header.audioChannels = audio->audioChannels;
-    archive_header.audioSampleRate = audio->audioSampleRate;
-    archive_header.audioBitPerSample = audio->audioBitPerSample;
-    archive_header.audioBitrate = audio->audioBitrate;
-    archive_type = kArchiveTypeAudio;
+    if (auto audio = std::dynamic_pointer_cast<Pnx::Media::AudioSourceFrame>(pnx_media_data->data); audio) {
+      archive_header.codecType = audio->codecType;
+      archive_header.packet_size = pnx_media_data->data->dataSize();
+      archive_header.packet_timestamp_msec = pnx_media_data->time_info.ToMilliSeconds();
+      archive_header.audioChannels = audio->audioChannels;
+      archive_header.audioSampleRate = audio->audioSampleRate;
+      archive_header.audioBitPerSample = audio->audioBitPerSample;
+      archive_header.audioBitrate = audio->audioBitrate;
+      archive_type = kArchiveTypeAudio;
+    } else {
+      std::cerr << "Failed to get audio source frame during copy process" << std::endl;
+    }
   }
 };
 
@@ -125,10 +131,13 @@ class ARCHIVE_MANAGER_API MetaData : public StreamBuffer {
     return *this;
   }
   void _CopyFromPnxMediaData(PnxMediaData* pnx_media_data) {
-    auto meta = std::dynamic_pointer_cast<Pnx::Media::MetaDataSourceFrame>(pnx_media_data->data);
-    archive_header.packet_size = pnx_media_data->data->dataSize();
-    archive_header.packet_timestamp_msec = pnx_media_data->time_info.ToMilliSeconds();
-    archive_type = kArchiveTypeMeta;
-    StreamBuffer::_CopyFromPnxMediaData(pnx_media_data);
+    if (auto meta = std::dynamic_pointer_cast<Pnx::Media::MetaDataSourceFrame>(pnx_media_data->data); meta) {
+      archive_header.packet_size = pnx_media_data->data->dataSize();
+      archive_header.packet_timestamp_msec = pnx_media_data->time_info.ToMilliSeconds();
+      archive_type = kArchiveTypeMeta;
+      StreamBuffer::_CopyFromPnxMediaData(pnx_media_data);
+    } else {
+      std::cerr << "Failed to get metadata source frame during copy process" << std::endl;
+    }
   }
 };

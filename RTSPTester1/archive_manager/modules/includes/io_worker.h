@@ -78,7 +78,7 @@ class IOWorker {
   std::optional<std::pair<ArchiveIndexHeader, ArchiveObject>> GetFrame(int time_stamp);
   std::optional<std::pair<ArchiveIndexHeader, ArchiveObject>> GetPrevFrame();
   std::optional<std::pair<ArchiveIndexHeader, ArchiveObject>> GetNextFrame();
-  void Flush() { reserve_flush_ = true; }
+  void Flush();
 
   std::function<void(SessionID session_id, MediaProfile profile, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>>)> callback_write_status_iwtaw_;
   void CallbackWirteStatusIWTAW(SessionID session_id, MediaProfile profile, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>> infos) {
@@ -122,7 +122,6 @@ class IOWorker {
 
   std::mutex mmy_buf_mtx_;
   std::vector<std::shared_ptr<BaseBuffer>> memory_buffer_frames;
-  bool reserve_flush_ = false;
   // Calculation
   BitrateMonitor bitrate_monitor_;
   std::chrono::time_point<std::chrono::high_resolution_clock> write_time_;

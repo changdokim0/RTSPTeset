@@ -41,11 +41,13 @@ void FileWriteIndexInfo::AddFrameInfo(FrameWriteIndexData timestamp) {
 }
 
 
-std::shared_ptr<std::vector<FrameWriteIndexData>> FileWriteIndexInfo::GetFrameInfos() {
+std::shared_ptr<std::vector<FrameWriteIndexData>> FileWriteIndexInfo::GetFrameInfos(std::string driver) {
   std::lock_guard<std::mutex> lock(queue_mtx_);
   std::shared_ptr<std::vector<FrameWriteIndexData>> frameinfos = std::make_shared<std::vector<FrameWriteIndexData>>();
-  for (auto frameinfo : frameInfos_)
+  for (auto frameinfo : frameInfos_) {
     frameinfos->push_back(frameinfo);
+    frameinfo.save_drive_ = driver;
+  }
   return frameinfos;
 }
 

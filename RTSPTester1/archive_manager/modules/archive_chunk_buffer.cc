@@ -41,12 +41,14 @@ ArchiveChunkBuffer::~ArchiveChunkBuffer() {
 
 void ArchiveChunkBuffer::PushQueue(std::shared_ptr<StreamBuffer> buffer) {
   std::lock_guard<std::mutex> lock(buffer_mtx_);
-  chunk_block_buffers_.push_back(buffer);
-  begin_time_msec_ = (((buffer->timestamp_msec) < (begin_time_msec_)) ? (buffer->timestamp_msec) : (begin_time_msec_));
-  end_time_msec_ = (((buffer->timestamp_msec) > (end_time_msec_)) ? (buffer->timestamp_msec) : (end_time_msec_));
-  total_data_size_ += buffer->buffer->dataSize();
+  chunk_block_buffers_.push_back(buffer);  
   if (buffer->archive_type == kArchiveTypeFrameVideo)
+    end_time_msec_ = (((buffer->timestamp_msec) > (end_time_msec_)) ? (buffer->timestamp_msec) : (end_time_msec_));
+  total_data_size_ += buffer->buffer->dataSize();
+  if (buffer->archive_type == kArchiveTypeFrameVideo) {
+    begin_time_msec_ = (((buffer->timestamp_msec) < (begin_time_msec_)) ? (buffer->timestamp_msec) : (begin_time_msec_));
     total_header_size_ += sizeof(VideoHeader);
+  }
   else if (buffer->archive_type == kArchiveTypeAudio)
     total_header_size_ += sizeof(AudioHeader);
   else if (buffer->archive_type == kArchiveTypeMeta)
@@ -64,11 +66,17 @@ std::shared_ptr<StreamBuffer> ArchiveChunkBuffer::PopQueue() {
   return block_buffer;
 }
 
-
-int ArchiveChunkBuffer::GetHeadersSize() {
+int ArchiveChunkBuffer::GetInternalHeaderSize() {
   // Header : TotalHeaderFileSize + HeaderCount + [type + header]+ [type + header] + ...
   return total_header_size_ + (sizeof(int) * chunk_block_buffers_.size()) + (sizeof(int) * 2);
 }
+
+int ArchiveChunkBuffer::GetHeadersSize() {
+  std::lock_guard<std::mutex> lock(buffer_mtx_);
+
+  return GetInternalHeaderSize();
+}
+
 std::shared_ptr<char> ArchiveChunkBuffer::GetHeadersMemory() {
   std::lock_guard<std::mutex> lock(buffer_mtx_);
   total_data_size_ = 0;
@@ -84,7 +92,7 @@ std::shared_ptr<char> ArchiveChunkBuffer::GetHeadersMemory() {
   }
 
   // Header : TotalHeaderFileSize + HeaderCount + [type + header]+ [type + header] + ...
-  int size = GetHeadersSize(); 
+  int size = GetInternalHeaderSize(); 
   int headersize = 0;;
   int pos = 0;
   int item_count = chunk_block_buffers_.size();
@@ -145,7 +153,7 @@ unsigned long long ArchiveChunkBuffer::GetChunkEndTime() {
 unsigned int ArchiveChunkBuffer::GetChunkTotalSize() {
   std::lock_guard<std::mutex> lock(buffer_mtx_);
   // headers count + data size + count(int)
-  return total_data_size_ + GetHeadersSize() + sizeof(int);
+  return total_data_size_ + GetInternalHeaderSize() + sizeof(int);
 }
 
 bool ArchiveChunkBuffer::IsIncludedTime(unsigned long long timestamp_msec) {
@@ -157,22 +165,24 @@ bool ArchiveChunkBuffer::IsIncludedTime(unsigned long long timestamp_msec) {
 }
 
 
-std::shared_ptr<std::vector<FrameWriteIndexData>> ArchiveChunkBuffer::GetFrameInfos() {
+std::shared_ptr<std::vector<FrameWriteIndexData>> ArchiveChunkBuffer::GetFrameInfos(std::string driver) {
+  std::lock_guard<std::mutex> lock(buffer_mtx_);
   std::shared_ptr<std::vector<FrameWriteIndexData>> frameinfos = std::make_shared<std::vector<FrameWriteIndexData>>();
   for (auto frameinfo : chunk_block_buffers_) {
     FrameWriteIndexData frame_write_data;
     frame_write_data.archive_type = frameinfo.get()->archive_type;
     frame_write_data.packet_timestamp_msec = frameinfo.get()->timestamp_msec;
+    frame_write_data.save_drive_ = driver;
     frameinfos->push_back(frame_write_data);
   }
   return frameinfos;
 }
 
 void ArchiveChunkBuffer::TrimToLastGOP() {
+  std::lock_guard<std::mutex> lock(buffer_mtx_);
   if(chunk_block_buffers_.size() <= 1)
 	return;
 
-  std::lock_guard<std::mutex> lock(buffer_mtx_);
   std::list<std::shared_ptr<StreamBuffer>>::iterator last_iframe;
   auto it = chunk_block_buffers_.begin();
   for (; it != chunk_block_buffers_.end(); it++) {
@@ -192,11 +202,13 @@ void ArchiveChunkBuffer::TrimToLastGOP() {
   total_data_size_ = 0;
   total_header_size_ = 0;
   for (auto buffer : chunk_block_buffers_) {
-    begin_time_msec_ = (((buffer->timestamp_msec) < (begin_time_msec_)) ? (buffer->timestamp_msec) : (begin_time_msec_));
-    end_time_msec_ = (((buffer->timestamp_msec) > (end_time_msec_)) ? (buffer->timestamp_msec) : (end_time_msec_));
-    total_data_size_ += buffer->buffer->dataSize();
     if (buffer->archive_type == kArchiveTypeFrameVideo)
+      end_time_msec_ = (((buffer->timestamp_msec) > (end_time_msec_)) ? (buffer->timestamp_msec) : (end_time_msec_));
+    total_data_size_ += buffer->buffer->dataSize();
+    if (buffer->archive_type == kArchiveTypeFrameVideo) {
+      begin_time_msec_ = (((buffer->timestamp_msec) < (begin_time_msec_)) ? (buffer->timestamp_msec) : (begin_time_msec_));
       total_header_size_ += sizeof(VideoHeader);
+    }
     else if (buffer->archive_type == kArchiveTypeAudio)
       total_header_size_ += sizeof(AudioHeader);
     else if (buffer->archive_type == kArchiveTypeMeta)

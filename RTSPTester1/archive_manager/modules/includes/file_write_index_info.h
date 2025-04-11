@@ -41,7 +41,7 @@ class FileWriteIndexInfo {
   ~FileWriteIndexInfo();
   void AddFrameInfo(FrameWriteIndexData frameInfo);
 
-  std::shared_ptr<std::vector<FrameWriteIndexData>> GetFrameInfos();
+  std::shared_ptr<std::vector<FrameWriteIndexData>> GetFrameInfos(std::string driver);
   void ResetInfo();
   void Clear();
 

@@ -58,7 +58,7 @@ class ARCHIVE_MANAGER_API ArchiveChunkBuffer : public BaseBuffer {
   EncryptionType GetEncryptionType() { return encryption_type_; }
   void SetEncryptionType(EncryptionType type) { encryption_type_ = type; }
   bool IsIncludedTime(unsigned long long timestamp_msec);
-  std::shared_ptr<std::vector<FrameWriteIndexData>> GetFrameInfos();
+  std::shared_ptr<std::vector<FrameWriteIndexData>> GetFrameInfos(std::string driver);
   int GetHeadersSize();
   void SetChunkTotalSize(unsigned int total_data_size) { total_data_size_ = total_data_size; }
 
@@ -68,6 +68,7 @@ class ARCHIVE_MANAGER_API ArchiveChunkBuffer : public BaseBuffer {
   std::list<std::shared_ptr<StreamBuffer>>::const_iterator end() const { return chunk_block_buffers_.end(); }
 
  private:
+  int GetInternalHeaderSize();
   bool end_flag_ = false;
   unsigned int total_data_size_ = 0;
   unsigned int total_header_size_ = 0;

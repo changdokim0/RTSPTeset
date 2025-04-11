@@ -177,7 +177,8 @@ std::optional<std::vector<std::shared_ptr<StreamBuffer>>> ReaderObject::GetNextD
         buffers.push_back(buffer);
       }
 
-      if (reader_stream_chunk.GetCurrentData() == nullptr || reader_stream_chunk.GetCurrentData()->archive_type == kArchiveTypeFrameVideo)
+      auto current_data = reader_stream_chunk.GetCurrentData();
+      if (current_data == nullptr || current_data->archive_type == kArchiveTypeFrameVideo)
         break;
     }
   }
