@@ -330,25 +330,12 @@ void CFileLoaderTab::ConvertEpochToGMTAndLocalCString(long long epochTime, CStri
 }
 
 std::string CFileLoaderTab::formatTimestamp(long long timestampMs) {
-	// 밀리초를 초로 변환
 	std::chrono::milliseconds ms(timestampMs);
-
-	// epoch 기준으로부터의 시간 계산
 	auto timePoint = std::chrono::time_point<std::chrono::system_clock>(ms);
-
-	// std::time_t 형식으로 변환
 	std::time_t timeT = std::chrono::system_clock::to_time_t(timePoint);
-
-	// std::tm 구조체 생성
 	std::tm localTime;
-
-	// localtime_s를 사용하여 로컬 시간으로 변환
 	localtime_s(&localTime, &timeT);
-
-	// 밀리초를 계산
 	auto milliseconds = ms.count() % 1000;
-
-	// 문자열 스트림을 사용하여 형식화된 시간 문자열 생성
 	std::ostringstream oss;
 	oss << std::put_time(&localTime, "%Y-%m-%d %H:%M:%S") << '.'
 		<< std::setw(3) << std::setfill('0') << milliseconds;
@@ -428,7 +415,7 @@ void CFileLoaderTab::CopyToClipboard() {
 	}
 	int selectedItem = m_listCtrl.GetSelectionMark();
 	if (selectedItem != -1) {
-		CString itemText = m_listCtrl.GetItemText(selectedItem, 4);
+		CString itemText = m_listCtrl.GetItemText(selectedItem, 6);
 
 		// 클립보드에 복사
 		if (OpenClipboard()) {
