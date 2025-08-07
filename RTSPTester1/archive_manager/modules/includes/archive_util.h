@@ -39,6 +39,9 @@
 #include <unistd.h>
 #endif
 
+#include <spdlog/spdlog.h>
+#include <filesystem>
+#include <optional>
 #include <iostream>
 #include <cstring>
 
@@ -48,4 +51,5 @@ class ArchiveUtil {
   static short GetPageSize();
   static void SetZeroAfter(void* buffer, size_t size, size_t offset);
   static int PercentAvailableMemorySize();
+  static void RemoveIfEmpty(const std::filesystem::path& path, const std::string& folder_type);
 };

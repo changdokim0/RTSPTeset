@@ -62,10 +62,21 @@ std::optional<std::vector<std::string>> FileSearcher::GetFilesAndFolders(const s
 std::string FileSearcher::GetFolderFrTime(long long data_time) {
   std::string file_time;
   std::time_t timestamp = static_cast<std::time_t>(data_time);
-  std::tm* local_time = std::gmtime(&timestamp);
+  std::tm* timeinfo = std::gmtime(&timestamp);
+  std::tm local_time;
+  if (timeinfo == nullptr) {
+    auto time_point = std::chrono::system_clock::from_time_t(timestamp);
+    auto utc_time = std::chrono::system_clock::to_time_t(time_point);
+#ifdef _WIN32
+    gmtime_s(&local_time, &utc_time);  // Windows
+#else
+    gmtime_r(&utc_time, &local_time);  // POSIX
+#endif
+    timeinfo = &local_time;
+  }
 
   char time_str[40] = {0,};
-  std::snprintf(time_str, sizeof(time_str), "%04d/%02d/%02d/%02d", local_time->tm_year + 1900, local_time->tm_mon + 1, local_time->tm_mday, local_time->tm_hour);
+  std::snprintf(time_str, sizeof(time_str), "%04d/%02d/%02d/%02d", timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday, timeinfo->tm_hour);
   file_time = time_str;
   return file_time;
 }
@@ -192,7 +203,7 @@ std::optional<std::vector<Archive_FileInfo>> FileSearcher::GetNearestFileNames(f
         if (search_files == std::nullopt || search_files->size() <= 0)
           continue;
 
-        for (auto file_name : search_files.value()) {
+        for (const auto& file_name : search_files.value()) {
           if (file_name.find(profile.ToString()) == std::string::npos)
             continue;
 
@@ -264,7 +275,7 @@ std::optional<std::vector<Archive_FileInfo>> FileSearcher::GetNearestFileNames(f
       search_path = near_folder_name.value();
       continue;
     } else {
-      for (auto file_name : search_files.value()) {
+      for (const auto& file_name : search_files.value()) {
         int timestamp = ParseFileNameToTimestamp(file_name);
         if (timestamp > 0) {
           std::string path = media_path.string() + "/" + near_folder_name.value();
@@ -285,11 +296,22 @@ std::string FileSearcher::GetDatFileName(std::filesystem::path save_path, std::s
                                          long long begin_timestamp_msec) {
   std::string file_time;
   std::time_t timestamp = static_cast<std::time_t>(begin_timestamp_msec/ 1000);
-  std::tm* local_time = std::gmtime(&timestamp);
+  std::tm* timeinfo = std::gmtime(&timestamp);
+  std::tm local_time;
+  if (timeinfo == nullptr) {
+    auto time_point = std::chrono::system_clock::from_time_t(timestamp);
+    auto utc_time = std::chrono::system_clock::to_time_t(time_point);
+#ifdef _WIN32
+    gmtime_s(&local_time, &utc_time);  // Windows
+#else
+    gmtime_r(&utc_time, &local_time);  // POSIX
+#endif
+    timeinfo = &local_time;
+  }
 
   char time_str[40] = {0,};
-  std::snprintf(time_str, sizeof(time_str), "%04d%02d%02d%02d%02d%02d%03d", local_time->tm_year + 1900, local_time->tm_mon + 1, local_time->tm_mday,
-                local_time->tm_hour, local_time->tm_min, local_time->tm_sec, (unsigned int)(begin_timestamp_msec % 1000));
+  std::snprintf(time_str, sizeof(time_str), "%04d%02d%02d%02d%02d%02d%03d", timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday,
+                timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec, (unsigned int)(begin_timestamp_msec % 1000));
   std::string filename_time = time_str;
 
   return (save_path/session_id).string() + "/" + filetime + "/" + filename_time + "_" + profile.ToString() + ".dat";
@@ -325,7 +347,7 @@ unsigned int FileSearcher::TimestampFromFile(std::string file_path) {
   timeInfo.tm_sec = 0;
 
   std::time_t timestamp = std::mktime(&timeInfo);
-  return timestamp;
+  return static_cast<unsigned int>(timestamp % UINT_MAX);
 }
 
 unsigned int FileSearcher::ParseFileNameToTimestamp(std::string filename) {
@@ -360,5 +382,5 @@ unsigned int FileSearcher::ParseFileNameToTimestamp(std::string filename) {
 #else
   std::time_t gm_timestamp = timegm(&time_info);
 #endif
-  return gm_timestamp;
+  return static_cast<unsigned int>(gm_timestamp % UINT_MAX);
 }

@@ -36,8 +36,16 @@ ReaderObject::ReaderObject(MediaProfile pfofile_type) : profile_type_(pfofile_ty
 }
 
 ReaderObject::~ReaderObject() {
-  if (file_handle_.is_open())
-    file_handle_.close();
+  try {
+    if (file_handle_.is_open())
+      file_handle_.close();
+  } catch (const std::ios_base::failure& e) {
+    fprintf(stdout, "[%s:%d] IOStreams Exception caught in ReaderObject destructor: %s \n", __func__, __LINE__, e.what());
+  } catch (const std::exception& e) {
+    fprintf(stdout, "[%s:%d] Exception caught in ReaderObject destructor: %s \n", __func__, __LINE__, e.what());
+  } catch (...) {
+    fprintf(stdout, "[%s:%d] Unknown exception caught in ReaderObject destructor\n", __func__, __LINE__);
+  }
 }
 
 bool ReaderObject::isOpen() const {
@@ -199,7 +207,8 @@ std::optional<std::vector<std::shared_ptr<StreamBuffer>>> ReaderObject::GetNextD
           read_frame_position_msec_ = buffer->timestamp_msec;
           buffers.push_back(buffer);
         }
-        if (reader_stream_chunk.GetCurrentData() == nullptr || reader_stream_chunk.GetCurrentData()->archive_type == kArchiveTypeFrameVideo)
+        auto current_data = reader_stream_chunk.GetCurrentData();
+        if (current_data == nullptr || current_data->archive_type == kArchiveTypeFrameVideo)
           break;
       }
     } 

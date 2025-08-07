@@ -47,27 +47,21 @@ class ARCHIVE_MANAGER_API ArchiveManager {
   ArchiveManager& operator=(const ArchiveManager&) = delete;
   ~ArchiveManager(){};
 
-  static ArchiveManager* getInstance() {
-    if (archive_manager_ == nullptr) {
-      std::lock_guard<std::mutex> lock(mtx);
-      if (archive_manager_ == nullptr) {
-        archive_manager_ = new ArchiveManager();
-      }
-    }
-    return archive_manager_;
-  }
+  static ArchiveManager* getInstance();
 
   void InitailData();
   void SetSavePath(std::filesystem::path save_path);
   std::filesystem::path GetSavePath() { return save_path_; }
   std::map<std::string, std::tuple<bool, int>> GetSaveStatus();
   bool AddDevice(std::string device_driver);
-  bool AddSession(std::string device_driver, SessionID session_id, MediaProfile profile);
+  bool AddSession(std::string device_driver, SessionID session_id);
   bool DeleteDevice(std::string device_driver);
-  bool DeleteStream(SessionID session_id, MediaProfile profile);
-  bool CheckWorkerDrive(std::string session_id, std::string save_driver, std::shared_ptr<ArchiveWorker> workerptr);
-  bool SetDataEncryption(SessionID session_id, MediaProfile profile, EncryptionType encrytion_type);
-  bool Flush(SessionID session_id, MediaProfile profile);
+  bool DeleteAllDevices(void);
+  bool DeleteStream(SessionID session_id);
+  bool SetDataEncryption(SessionID session_id, EncryptionType encrytion_type);
+  bool Flush(SessionID session_id);
+  void ChangeArchiveSystemUUID(std::optional<std::string> prev_system_uuid, std::string target_system_uuid, std::optional<std::string> prev_server_uuid,
+                               std::string target_server_uuid, std::function<void(bool)> callback);
 
   // ********** write API **********
   bool PushDataGroup(std::shared_ptr<PnxMediaArchiveDataGroup> data_group);
@@ -88,11 +82,11 @@ class ARCHIVE_MANAGER_API ArchiveManager {
   
   // ********** Return Msg **********
   //callback aw -> am
-  void CallbackWirteStatusAWTAM(SessionID session_id, MediaProfile profile, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>> list);
-  void CallbackWriteResult(SessionID session_id, MediaProfile profile, 
-      const std::function<void(ChannelUUID channel, MediaProfile profile, bool is_success, std::shared_ptr<std::vector<FrameWriteIndexData>> infos)>& cb_func);
+  void CallbackWirteStatusAWTAM(SessionID session_id, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>> list);
+  void CallbackWriteResult(SessionID session_id,
+                           const std::function<void(SessionID session_id, bool is_success, std::shared_ptr<std::vector<FrameWriteIndexData>> infos)>& cb_func);
+  void DeleteCallbackFunction(SessionID session_id);
 
-  void DeleteCallbackFunction(SessionID session_id, MediaProfile profile);
  private:
   std::filesystem::path save_path_;
   std::map<std::string, std::shared_ptr<ArchiveWorker>> archive_workers;  // key:  Drive
@@ -100,8 +94,10 @@ class ARCHIVE_MANAGER_API ArchiveManager {
   std::shared_mutex mtx_worker;
   std::shared_mutex callback_mtx;
   ReaderWorker reader_worker_;
-  std::unordered_map<std::string, std::function<void(SessionID session_id, MediaProfile profile, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>>)>>
+  std::unordered_map<std::string, std::function<void(SessionID session_id, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>>)>>
       callback_writeresults_;
   static ArchiveManager* archive_manager_;
   static std::mutex mtx;
+
+  bool CheckWorkerDrive(std::string session_id, std::string save_driver, std::shared_ptr<ArchiveWorker> workerptr);
 };

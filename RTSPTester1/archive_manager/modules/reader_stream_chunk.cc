@@ -52,8 +52,10 @@ bool ReaderStreamChunk::LoadFrames(std::shared_ptr<char> data, int data_size, En
   memcpy(&header_count, data.get() + mempos, sizeof(int));
   mempos += sizeof(int);
 
-  if (data_size < header_size || header_count < 0 || header_count > 500 )
+  if (data_size < header_size || header_count < 0 || header_count > ARCHIVER_CHUNK_MAX_SIZE) {
+    SPDLOG_ERROR("FAIL LoadFrames Header header_size[{}], data_size[{}], header_count[{}]", header_size, data_size, header_count);
     return false;
+  }
 
   for (int i = 0; i < header_count; i++) {
     ArchiveType archive_type = kArchiveTypeNone; 
@@ -86,7 +88,7 @@ bool ReaderStreamChunk::LoadFrames(std::shared_ptr<char> data, int data_size, En
     }
   }
 
-  if (datas_.size() < 0)
+  if (datas_.size() == 0)
     return false;
     
   for (auto frame : datas_) {
@@ -127,7 +129,7 @@ bool ReaderStreamChunk::LoadFrames(std::shared_ptr<char> data, int data_size, En
 }
 
 std::shared_ptr<ArchiveChunkBuffer> ReaderStreamChunk::GetStreamChunk(unsigned long long& timestamp_msec, ArchiveChunkReadType GovReadType) {
-  if (datas_.size() <= data_index_) {
+  if (datas_.size() < data_index_) {
     return nullptr;
   }
 
@@ -159,7 +161,7 @@ std::shared_ptr<ArchiveChunkBuffer> ReaderStreamChunk::GetStreamChunk(unsigned l
 }
 
 std::shared_ptr<ArchiveChunkBuffer> ReaderStreamChunk::GetStreamGop(unsigned long long& timestamp_msec, ArchiveChunkReadType GovReadType) {
-  if (datas_.size() <= data_index_) {
+  if (datas_.size() < data_index_) {
     return nullptr;
   }
 

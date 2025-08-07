@@ -64,7 +64,7 @@ bool ReaderWorker::ParseHeader(std::string file_name, std::shared_ptr<ReaderObje
   return read_object.get()->ParseMainHeader();
 }
 
-std::shared_ptr<std::deque<Archive_FileInfo>> ReaderWorker::GetNearestFile(std::vector<std::filesystem::path> drives, SessionID session_id,
+std::shared_ptr<std::deque<Archive_FileInfo>> ReaderWorker::GetNearestFile(std::vector<std::filesystem::path> drives, ChannelUUID channel_uuid,
                                                                            unsigned int time_stamp,
                                                                             MediaProfile profile_type, ArchiveReadType archive_read_type,
                                                                             bool is_include_curfile) {
@@ -75,12 +75,12 @@ std::shared_ptr<std::deque<Archive_FileInfo>> ReaderWorker::GetNearestFile(std::
   std::shared_ptr<std::deque<Archive_FileInfo>> files = std::make_shared<std::deque<Archive_FileInfo>>();
   for (const auto& drive : drives) {
     std::optional<std::vector<Archive_FileInfo>> file_names =
-        FileSearcher::GetNearestFileNames(drive, save_path_, session_id, time_stamp, profile_type, archive_read_type, is_include_curfile);
+        FileSearcher::GetNearestFileNames(drive, save_path_, channel_uuid, time_stamp, profile_type, archive_read_type, is_include_curfile);
 
     if (file_names == std::nullopt)
       continue;
 
-    for (auto path : file_names.value()) {
+    for (const auto& path : file_names.value()) {
       files->push_back(path);
     }
   }
@@ -129,15 +129,19 @@ std::shared_ptr<std::deque<Archive_FileInfo>> ReaderWorker::GetNearestFile(std::
   return files;
 }
 
-bool ReaderWorker::Seek(SessionID session_id, unsigned long long time_stamp_msec, ArchiveReadType archive_read_type, std::shared_ptr<ReaderObject> read_object) {
+bool ReaderWorker::Seek(ChannelUUID channel_uuid, unsigned long long time_stamp_msec, ArchiveReadType archive_read_type,
+                        std::shared_ptr<ReaderObject> read_object) {
   if (time_stamp_msec < 10000) {
     SPDLOG_ERROR("Invalid time value received in seek function. [{}]", time_stamp_msec);
     return false;
   }
-  if (drives_.size() == 0) {
-    SPDLOG_ERROR("No drive is registered.");
-	return false;
-  
+
+  {
+    std::lock_guard<std::mutex> lock(drive_mtx_);
+    if (drives_.size() == 0) {
+      SPDLOG_ERROR("No drive is registered.");
+      return false;
+    }
   }
 
   std::vector<std::filesystem::path> drives;
@@ -149,11 +153,11 @@ bool ReaderWorker::Seek(SessionID session_id, unsigned long long time_stamp_msec
   }
 
   std::shared_ptr<std::deque<Archive_FileInfo>> nearestfile2 =
-      GetNearestFile(drives, session_id, time_stamp_msec / 1000, read_object.get()->GetProfile(), archive_read_type, true);
+      GetNearestFile(drives, channel_uuid, time_stamp_msec / 1000, read_object.get()->GetProfile(), archive_read_type, true);
   if (nearestfile2 == nullptr)
     return false;
 
-  read_object.get()->SetInfo(session_id);
+  read_object.get()->SetInfo(channel_uuid);
   read_object.get()->SetFiles(nearestfile2);
   std::optional<Archive_FileInfo> file_info;
 
@@ -322,7 +326,18 @@ std::optional<std::vector<std::shared_ptr<StreamBuffer>>> ReaderWorker::GetNextD
 
 time_t ReaderWorker::getNextHourLastSecond(time_t timestamp, int add_hour, ArchiveReadType archive_read_type) {
    struct tm* timeinfo = gmtime(&timestamp);
-   //struct tm* timeinfo = localtime(&timestamp);
+   std::tm local_time;
+   if (timeinfo == nullptr) {
+     auto time_point = std::chrono::system_clock::from_time_t(timestamp);
+     auto utc_time = std::chrono::system_clock::to_time_t(time_point);
+#ifdef _WIN32
+     gmtime_s(&local_time, &utc_time);  // Windows
+#else
+     gmtime_r(&utc_time, &local_time);  // POSIX
+#endif
+     timeinfo = &local_time;
+   }
+
    if (archive_read_type == kArchiveReadNext) {
      timeinfo->tm_hour += add_hour;
      timeinfo->tm_min = 59;
@@ -332,7 +347,7 @@ time_t ReaderWorker::getNextHourLastSecond(time_t timestamp, int add_hour, Archi
      timeinfo->tm_min = 0;
      timeinfo->tm_sec = 0;
    }
- 
+
 #ifdef _WIN32
    std::time_t gm_timestamp = _mkgmtime(timeinfo);
 #else

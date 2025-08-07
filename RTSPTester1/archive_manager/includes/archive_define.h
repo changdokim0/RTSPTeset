@@ -31,22 +31,23 @@
 
 #pragma once
 
-#ifdef _WIN32
-#ifdef ARCHIVE_MANAGER_EXPORTS
-#define ARCHIVE_MANAGER_API __declspec(dllexport)
-#else
-#define ARCHIVE_MANAGER_API __declspec(dllimport)
-#endif
-#else
-#define ARCHIVE_MANAGER_API
-#endif
-
+//#ifdef _WIN32
+//#ifdef ARCHIVE_MANAGER_EXPORTS
+//#define ARCHIVE_MANAGER_API __declspec(dllexport)
+//#else
+//#define ARCHIVE_MANAGER_API __declspec(dllimport)
+//#endif
+//#else
+//#define ARCHIVE_MANAGER_API
+//#endif
 #define ARCHIVE_MANAGER_API
 
 #define _CRT_SECURE_NO_WARNINGS
 
 #ifdef _WIN32
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <Windows.h>
 #else
 #include <fcntl.h>
@@ -112,11 +113,12 @@ extern int g_dio_indexer_size_;
 // define param's
 ///////////////////////////////////////
 
-#define IOWORKER_QUEUE_MAX_COUNT			10
-#define ARCHIVER_BUFFER_MEMORY_PERCENT		70
-#define ARCHIVER_SIMULATION_DELETE_TIME		7200 // 2 hour
-#define ARCHIVER_VERSOIN					0001
-#define SAVED_TIME							600
+#define IOWORKER_QUEUE_MAX_COUNT              10
+#define ARCHIVER_BUFFER_MEMORY_PERCENT        70
+#define ARCHIVER_SIMULATION_DELETE_TIME       7200  // 2 hour
+#define ARCHIVER_VERSOIN                      0001
+#define SAVED_TIME                            600
+#define ARCHIVER_CHUNK_MAX_SIZE               10000
 
 
 ///////////////////////////////////////
@@ -131,8 +133,6 @@ using FileHandle = int;
 const FileHandle InvalidHandle = -1;
 #endif
 
-using SessionID = std::string;
-
 ///////////////////////////////////////
 // Global function's
 ///////////////////////////////////////
@@ -141,6 +141,25 @@ using SessionID = std::string;
 ///////////////////////////////////////
 // Struct's
 ///////////////////////////////////////
+
+struct SessionID {
+ public:
+  SessionID(const std::string& uuid, PnxMediaArchiveInfo::EPurpose purp = PnxMediaArchiveInfo::EPurpose::kRecord, const MediaProfile& prof = MediaProfile())
+      : purpose(purp), channel_uuid(uuid), profile(prof) {}
+
+  SessionID& operator=(const SessionID& other) {
+    if (this != &other) {
+      purpose = other.purpose;
+      channel_uuid = other.channel_uuid;
+      profile = other.profile;
+    }
+    return *this;
+  }
+
+  PnxMediaArchiveInfo::EPurpose purpose = PnxMediaArchiveInfo::EPurpose::kRecord;
+  std::string channel_uuid;
+  MediaProfile profile;
+};
 
 #pragma pack(push, 1)
 struct ArchiveIndexHeader {
@@ -188,8 +207,7 @@ struct FrameWriteIndexData {
 };
 #pragma pack(pop)
 
-std::string GetStreamID(SessionID session_id, MediaProfile profile);
-
+std::string GetStreamID(SessionID session_id);
 
 ///////////////////////////////////////
 // LOG

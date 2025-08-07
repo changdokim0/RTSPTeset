@@ -1804,8 +1804,12 @@ bool RTSPClient::pauseMediaSession(MediaSession& session)
 int RTSPClient::openURL(const char *url, int streamType, int timeout, bool rtpOnly, bool isPlayback)
 {
 	bool isOpened = false;
-	char *username = NULL;
-	char *password = NULL;
+	//char *username = NULL;
+	//char *password = NULL;
+	char username[200] = {0, };
+	char password[200] = {0, };
+	strcpy(username, "admin");
+	strcpy(password, "5hanwha!");
 	const char *parsedURL = NULL;
 
 	m_nTimeoutSecond = timeout;
@@ -1826,9 +1830,7 @@ int RTSPClient::openURL(const char *url, int streamType, int timeout, bool rtpOn
 
 		parsedURL = new char[strlen(ip_address)+strlen(urlSuffix)+20];
 		sprintf((char *)parsedURL, "rtsp://%s:%hu%s", ip_address, port, urlSuffix);
-
-		parseRTSPURLUsernamePassword(url, username, password);
-
+		//parseRTSPURLUsernamePassword(url, username, password);
 		if (connectToServer(ip_address, port, timeout) < 0)
 			break;
 
@@ -1842,7 +1844,6 @@ int RTSPClient::openURL(const char *url, int streamType, int timeout, bool rtpOn
 		delete[] result;
 
 		char *sdpDescription = NULL;
-
 		if (username != NULL && password != NULL)
 			sdpDescription = describeWithPassword(url, username, password);
 		else

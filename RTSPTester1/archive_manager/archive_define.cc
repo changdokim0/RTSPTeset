@@ -37,12 +37,17 @@ int g_dio_page_size_ = 4096;
 int g_dio_buffer_size_ = g_dio_page_size_ * (244 * 1.5);
 int g_dio_indexer_size_ = g_dio_page_size_ * 20;  // 45kbyte 
 
-std::string GetStreamID(SessionID session_id, MediaProfile profile) {
-  return session_id + "_" + profile.ToString();
+std::string GetStreamID(SessionID session_id) {
+  std::string stream_id = session_id.channel_uuid + "_" + session_id.profile.ToString();
+  if (session_id.purpose == PnxMediaArchiveInfo::EPurpose::kBackup) {
+    stream_id += "_backup";
+  } else if (session_id.purpose == PnxMediaArchiveInfo::EPurpose::kRecord) {
+    stream_id += "_record";
+  } 
+  return stream_id;
 }
 
 //std::mutex log_mutex_;
-
 //void set_color(LogLevel level) {
 //  switch (level) {
 //    case AL_DEBUG:

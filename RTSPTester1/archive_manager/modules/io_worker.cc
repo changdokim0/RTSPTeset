@@ -32,10 +32,11 @@
 #include <chrono>
 #include <cmath>
 
-IOWorker::IOWorker(std::string session_id, MediaProfile profile) : session_id_(session_id), profile_(profile) {
-
-  std::string profileaa = profile.ToString();
-  if (profile == MediaProfile::kSecondary) {
+IOWorker::IOWorker(SessionID session_id) : session_id_(session_id){
+  profile_ = session_id_.profile;
+  channel_uuid_ = session_id_.channel_uuid;
+  std::string profileaa = session_id_.profile.ToString();
+  if (session_id_.profile == MediaProfile::kSecondary) {
     dio_buffer_nomal_size = g_dio_page_size_ * 122;
     dio_buffer_busy_size = g_dio_page_size_ * 244;
   } else {
@@ -45,11 +46,19 @@ IOWorker::IOWorker(std::string session_id, MediaProfile profile) : session_id_(s
 
   write_file_data_handle_ = std::make_shared<DataFileHandle>(g_dio_page_size_ * 30, dio_buffer_busy_size);
   SPDLOG_INFO("[ArchiveL] ioworker - create memory buffer   [{}]", dio_buffer_busy_size);
-  SPDLOG_INFO("[ArchiveL] ioworker - create stream  [{}]", session_id.c_str());
+  SPDLOG_INFO("[ArchiveL] ioworker - create stream  [{}]", channel_uuid_);
 }
 
 IOWorker::~IOWorker() {
-  SPDLOG_INFO("[ArchiveL] ioworker - delete stream  [{}]", stream_id_.c_str());
+  try {
+    SPDLOG_INFO("[ArchiveL] ioworker - delete stream  [{}]", stream_id_.c_str());
+  } catch (const std::bad_array_new_length& e) {
+    fprintf(stdout, "[%s:%d][ArchiveL] bad_array_new_length Exception caught in IOWorker destructor: %s \n", __func__, __LINE__, e.what());
+  } catch (const std::exception& e) {
+    fprintf(stdout, "[%s:%d][ArchiveL] Exception caught in IOWorker destructor: %s \n", __func__, __LINE__, e.what());
+  } catch (...) {
+    fprintf(stdout, "[%s:%d][ArchiveL] Unknown exception caught in IOWorker destructor. \n", __func__, __LINE__);
+  }
 }
 
 void IOWorker::SetPath(std::filesystem::path save_path) {
@@ -74,11 +83,12 @@ bool IOWorker::PushVideoChunkBuffer(std::filesystem::path save_driver, std::shar
     MemoryCheck();
     QueueCheck();
   }
-  //printf("[%s]session[%s]stream[%s]profile[%s] save_driver_[%s]\n", __FUNCTION__, session_id_.c_str(), stream_id_.c_str(), profile_.ToString().c_str(), save_driver_.string().c_str());
+  //printf("[%s]session[%s]stream[%s]profile[%s] save_driver_[%s]\n", __FUNCTION__, channel_uuid_.c_str(), stream_id_.c_str(), profile_.ToString().c_str(), save_driver_.string().c_str());
   return true;
 }
 
 bool IOWorker::ProcessBuffer(unsigned int current_time) {
+  std::unique_lock<std::mutex> lock(write_process_mtx_);
 
   while (true) {
     if (file_handle != InvalidHandle && file_write_timestamp_ != 0 && std::abs((int)current_time - (int)file_write_timestamp_) > SAVED_TIME ) {
@@ -118,15 +128,15 @@ bool IOWorker::ProcessBuffer(unsigned int current_time) {
 
 bool IOWorker::ProcessChunkBuffers(std::shared_ptr<ArchiveChunkBuffer> gop_buffers) {
   if (!UpdateFileNameByCondition(file_handle, gop_buffers->GetChunkBeginTime())) {
-    SPDLOG_ERROR("[ArchiveL] [{}][{}]{}] UpdateFileNameByCondition error", session_id_, stream_id_, profile_.ToString());
-    CallbackWirteStatusIWTAW(session_id_, profile_, false, gop_buffers->GetFrameInfos(save_driver_.string()));
+    SPDLOG_ERROR("[ArchiveL] [{}][{}]{}] UpdateFileNameByCondition error", channel_uuid_, stream_id_, profile_.ToString());
+    CallbackWirteStatusIWTAW(session_id_, false, gop_buffers->GetFrameInfos(save_driver_.string()));
     index_buffer_info_.Clear();
     return false;
   }
   if (!WriteIndexInfo(kArchiveTypeGopVideo, gop_buffers->GetChunkTotalSize(), gop_buffers->GetChunkBeginTime(), gop_buffers->GetChunkEndTime(),
                       gop_buffers->GetEncryptionType())) {
-    SPDLOG_ERROR("[ArchiveL] [{}][{}][{}] WriteIndexInfo error", session_id_, stream_id_, profile_.ToString());
-    CallbackWirteStatusIWTAW(session_id_, profile_, false, gop_buffers->GetFrameInfos(save_driver_.string()));
+    SPDLOG_ERROR("[ArchiveL] [{}][{}][{}] WriteIndexInfo error", channel_uuid_, stream_id_, profile_.ToString());
+    CallbackWirteStatusIWTAW(session_id_, false, gop_buffers->GetFrameInfos(save_driver_.string()));
     index_buffer_info_.Clear();
     return false;
   }
@@ -147,12 +157,12 @@ bool IOWorker::ProcessChunkBuffers(std::shared_ptr<ArchiveChunkBuffer> gop_buffe
       continue;
 
     if (!WriteBufferToDisk(buffer->buffer)) {
-      SPDLOG_ERROR("[ArchiveL] [{}][{}][{}] WriteBufferToDisk failed", session_id_, stream_id_, profile_.ToString());
+      SPDLOG_ERROR("[ArchiveL] [{}][{}][{}] WriteBufferToDisk failed", channel_uuid_, stream_id_, profile_.ToString());
       fail = true;
       continue;
     }
 
-    file_write_timestamp_ = static_cast<unsigned int>(time(nullptr));
+    file_write_timestamp_ = static_cast<unsigned int>(time(nullptr) % UINT_MAX);
   }
   std::unique_lock<std::mutex> lock(mmy_buf_mtx_);
   memory_buffer_frames.push_back(buffers);
@@ -162,12 +172,16 @@ bool IOWorker::ProcessChunkBuffers(std::shared_ptr<ArchiveChunkBuffer> gop_buffe
 bool IOWorker::WriteIndexInfo(ArchiveType archive_type, int packet_size, unsigned long long begin_timestramp_msec, unsigned long long end_timestramp_msec,
                               EncryptionType encryption_type) {
   long long current_file_position = platform_file_.GetDatFilePosition(file_handle);
+  if (current_file_position < 0) {
+    SPDLOG_ERROR("[ArchiveL] PlatformFile::GetDatFilePosition Fail  [{}], profile[{}]", channel_uuid_.c_str(), profile_.ToString().c_str());
+    return false;
+  }
   if (!platform_file_.SetDatFilePosition(file_handle, 0)) {
-    SPDLOG_ERROR("[ArchiveL] PlatformFile::SetDatFilePosition Fail  [{}], profile[{}]", session_id_.c_str(), profile_.ToString().c_str());
+    SPDLOG_ERROR("[ArchiveL] PlatformFile::SetDatFilePosition Fail  [{}], profile[{}]", channel_uuid_.c_str(), profile_.ToString().c_str());
     return false;
   }
   if (write_file_indexer_handle.buffer_pos + sizeof(ArchiveIndexHeader) > g_dio_indexer_size_){
-    SPDLOG_ERROR("[ArchiveL] Header index buffer over flow!!!!! need size up!!  [{}], profile[{}]", session_id_.c_str(), profile_.ToString().c_str());
+    SPDLOG_ERROR("[ArchiveL] Header index buffer over flow!!!!! need size up!!  [{}], profile[{}]", channel_uuid_.c_str(), profile_.ToString().c_str());
     return false;
   }
   ArchiveIndexHeader archive_index_header;
@@ -182,13 +196,13 @@ bool IOWorker::WriteIndexInfo(ArchiveType archive_type, int packet_size, unsigne
   memcpy(write_file_indexer_handle.writebuffer + write_file_indexer_handle.buffer_pos, &archive_index_header, sizeof(ArchiveIndexHeader));
   write_file_indexer_handle.buffer_pos += sizeof(ArchiveIndexHeader);
   if (!platform_file_.FileWrite(file_handle, write_file_indexer_handle.writebuffer, g_dio_indexer_size_)) {
-    SPDLOG_ERROR("[ArchiveL] PlatformFile::FileWrite Fail  [{}], profile[{}]", session_id_.c_str(), profile_.ToString().c_str());
+    SPDLOG_ERROR("[ArchiveL] PlatformFile::FileWrite Fail  [{}], profile[{}]", channel_uuid_.c_str(), profile_.ToString().c_str());
     write_file_indexer_handle.buffer_pos = current_file_position;
     return false;
   }
 
   if (!platform_file_.SetDatFilePosition(file_handle, current_file_position)) {
-    SPDLOG_ERROR("[ArchiveL] PlatformFile::SetDatFilePosition Fail  [{}], profile[{}]", session_id_.c_str(), profile_.ToString().c_str());
+    SPDLOG_ERROR("[ArchiveL] PlatformFile::SetDatFilePosition Fail  [{}], profile[{}]", channel_uuid_.c_str(), profile_.ToString().c_str());
     return false;
   }
   return true;
@@ -272,8 +286,10 @@ bool IOWorker::WriteDisk(FileHandle handle, char* buffer, int write_size) {
 bool IOWorker::WriteFileChange(std::string filetime, unsigned long long timestamp) {
 
   FileClose();
-  write_file_name_ = FileSearcher::GetDatFileName(save_driver_ / save_path_, session_id_, filetime, profile_, timestamp);
-
+  write_file_name_ = FileSearcher::GetDatFileName(save_driver_ / save_path_, channel_uuid_, filetime, profile_, timestamp);
+  if (std::filesystem::exists(write_file_name_)) {
+    write_file_name_ = FileSearcher::GetDatFileName(save_driver_ / save_path_, channel_uuid_, filetime, profile_, timestamp + 1);
+  }
   file_handle = platform_file_.FileDirectOpen(write_file_name_);
   if (file_handle == InvalidHandle) {
     SPDLOG_ERROR("[ArchiveL] create file fail[{}]", write_file_name_.c_str());
@@ -425,7 +441,7 @@ void IOWorker::WriteDiskSuccess() {
   // Success
   write_file_data_handle_->buffer_pos = 0;
   std::shared_ptr<std::vector<FrameWriteIndexData>> frameinfos = index_buffer_info_.GetFrameInfos(save_driver_.string());
-  CallbackWirteStatusIWTAW(session_id_, profile_, true, frameinfos);
+  CallbackWirteStatusIWTAW(session_id_, true, frameinfos);
   index_buffer_info_.ResetInfo();
   write_time_ = std::chrono::high_resolution_clock::now();
 }
@@ -437,23 +453,27 @@ void IOWorker::WriteDiskFail() {
   ArchiveUtil::SetZeroAfter(write_file_indexer_handle.writebuffer, g_dio_indexer_size_, write_file_indexer_handle.buffer_pos);
 
   long long current_file_position = platform_file_.GetDatFilePosition(file_handle);
-  if (!platform_file_.SetDatFilePosition(file_handle, 0)) {
-    SPDLOG_ERROR("[ArchiveL] PlatformFile::SetDatFilePosition Fail ");
-  }
+  if (current_file_position > 0) {
+     if (!platform_file_.SetDatFilePosition(file_handle, 0)) {
+      SPDLOG_ERROR("[ArchiveL] PlatformFile::SetDatFilePosition Fail ");
+    }
 
-  if (!platform_file_.FileWrite(file_handle, write_file_indexer_handle.writebuffer, g_dio_indexer_size_)) {
-    SPDLOG_ERROR("[ArchiveL] PlatformFile::FileWrite Fail ");
-    write_file_indexer_handle.buffer_pos = current_file_position;
-  }
+    if (!platform_file_.FileWrite(file_handle, write_file_indexer_handle.writebuffer, g_dio_indexer_size_)) {
+      SPDLOG_ERROR("[ArchiveL] PlatformFile::FileWrite Fail ");
+      write_file_indexer_handle.buffer_pos = current_file_position;
+    }
 
-  if (!platform_file_.SetDatFilePosition(file_handle, current_file_position)) {
-    SPDLOG_ERROR("[ArchiveL] PlatformFile::SetDatFilePosition Fail");
+    if (!platform_file_.SetDatFilePosition(file_handle, current_file_position)) {
+      SPDLOG_ERROR("[ArchiveL] PlatformFile::SetDatFilePosition Fail");
+    }
+  } else {
+    SPDLOG_ERROR("[ArchiveL] PlatformFile::GetDatFilePosition Fail");
   }
 
   // fail
   write_file_data_handle_->buffer_pos = 0;
   std::shared_ptr<std::vector<FrameWriteIndexData>> frameinfos = index_buffer_info_.GetFrameInfos(save_driver_.string());
-  CallbackWirteStatusIWTAW(session_id_, profile_, false, frameinfos);
+  CallbackWirteStatusIWTAW(session_id_, false, frameinfos);
   index_buffer_info_.Clear();
 }
 
@@ -540,8 +560,8 @@ void IOWorker::QueueCheck() {
   }
 
   if (frameinfos->size() > 0) {
-    SPDLOG_ERROR("[ArchiveL] Buffer Over flow !!!!! session_id[{}], profile[{}]", session_id_.c_str(), profile_.ToString().c_str());
-    CallbackWirteStatusIWTAW(session_id_, profile_, false, frameinfos);
+    SPDLOG_ERROR("[ArchiveL] Buffer Over flow !!!!! session_id[{}], profile[{}]", channel_uuid_, profile_.ToString().c_str());
+    CallbackWirteStatusIWTAW(session_id_, false, frameinfos);
     index_buffer_info_.Clear();
   }
 }
@@ -553,16 +573,16 @@ void IOWorker::MemoryCheck() {
     int memory_percent = ArchiveUtil::PercentAvailableMemorySize();
     if (memory_percent < ARCHIVER_BUFFER_MEMORY_PERCENT) {
       buffer_size_ += inclease_size;
-      SPDLOG_INFO("[ArchiveL] MemoryCheck Buffer buffer size up session_id[{}], profile[{}], buffer_size_[{}], memory_percent[{}]", session_id_.c_str(),
+      SPDLOG_INFO("[ArchiveL] MemoryCheck Buffer buffer size up session_id[{}], profile[{}], buffer_size_[{}], memory_percent[{}]", channel_uuid_,
                    profile_.ToString().c_str(), buffer_size_, memory_percent);
     } else if (memory_percent > ARCHIVER_BUFFER_MEMORY_PERCENT + 10 && buffer_size_ > IOWORKER_QUEUE_MAX_COUNT + inclease_size) {
       buffer_size_ -= inclease_size;
-      SPDLOG_INFO("[ArchiveL] MemoryCheck Buffer buffer size down session_id[{}], profile[{}], buffer_size_[{}], memory_percent[{}]", session_id_.c_str(),
+      SPDLOG_INFO("[ArchiveL] MemoryCheck Buffer buffer size down session_id[{}], profile[{}], buffer_size_[{}], memory_percent[{}]", channel_uuid_,
                   profile_.ToString().c_str(), buffer_size_, memory_percent);
     }
   } else if (media_buffers.size() < inclease_size && buffer_size_ != IOWORKER_QUEUE_MAX_COUNT) {
     buffer_size_ = IOWORKER_QUEUE_MAX_COUNT;
-    SPDLOG_INFO("[ArchiveL] MemoryCheck Buffer Reset session_id[{}], profile[{}], buffer_size_[{}]", session_id_.c_str(),
+    SPDLOG_INFO("[ArchiveL] MemoryCheck Buffer Reset session_id[{}], profile[{}], buffer_size_[{}]", channel_uuid_,
                 profile_.ToString().c_str(), buffer_size_);
   }
   media_buffer_mtx_.unlock_shared();
@@ -616,20 +636,25 @@ bool IOWorker::DoEncryption(std::shared_ptr<ArchiveChunkBuffer> media_datas) {
 }
 
 void IOWorker::Flush() {
+  SPDLOG_INFO("{} +++", __func__);
   SPDLOG_INFO("[ArchiveL--] PushVideoChunkBuffer stream_id_[{}] ProcessFlush() 0 ", stream_id_.c_str());
   std::shared_ptr<StreamBuffer> flush_datas = std::make_shared<StreamBuffer>();
   flush_datas->archive_type = kArchiveTypeFlush;
 
   std::unique_lock<std::shared_mutex> lock(media_buffer_mtx_);
   media_buffers.push(flush_datas);
-
+  SPDLOG_INFO("{} ---", __func__);
 }
 
 void IOWorker::ProcessFlush() {
-
-  SPDLOG_INFO("[ArchiveL--] PushVideoChunkBuffer stream_id_[{}] ProcessFlush() 2, buffersize[{}]", stream_id_.c_str(), media_buffers.size());
+  SPDLOG_INFO("{} +++", __func__);
+  {
+    std::unique_lock<std::shared_mutex> lock(media_buffer_mtx_);
+    SPDLOG_INFO("[ArchiveL--] PushVideoChunkBuffer stream_id_[{}] ProcessFlush() 2, buffersize[{}]", stream_id_.c_str(), media_buffers.size()); 
+  }
   FileClose();
   index_buffer_info_.Clear();
+  SPDLOG_INFO("{} ---", __func__);
 }
 
 std::tuple<bool, int> IOWorker::GetSaveStatus() {
@@ -648,7 +673,7 @@ std::shared_ptr<ArchiveChunkBuffer> IOWorker::GetMemoryFrames(int64_t timestamp)
   std::unique_lock<std::mutex> lock(mmy_buf_mtx_);
   for (auto data : memory_buffer_frames) {
     if (auto gop_buffers = std::dynamic_pointer_cast<ArchiveChunkBuffer>(data)) {
-      if (gop_buffers->GetChunkEndTime() + 200 > timestamp) {
+      if (gop_buffers->GetChunkEndTime() > timestamp && gop_buffers->GetChunkBeginTime() < timestamp) {
         SPDLOG_INFO("[ArchiveL] IOWorker::GetMemoryFrames 1 : timestamp[{}], BeginTime[{}], EndTime[{}]", timestamp, gop_buffers->GetChunkBeginTime(),
                     gop_buffers->GetChunkEndTime());
         return gop_buffers;

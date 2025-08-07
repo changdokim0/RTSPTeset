@@ -48,7 +48,10 @@ FileHandle PlatformFile::FileDirectOpen(std::string file_name) {
     std::filesystem::path p(file_name);
     std::string path = p.parent_path().string();
     if (!std::filesystem::exists(path)) {
-      std::filesystem::create_directories(path);
+      if (!std::filesystem::create_directories(path)) {
+        SPDLOG_ERROR("Failed to create directory[{}], error code[{}]", path.c_str(), strerror(errno));
+        return InvalidHandle;
+      }
     }
     file_name_ = file_name;
 #ifdef _WIN32
@@ -109,18 +112,37 @@ bool PlatformFile::CloseFile(FileHandle& hFile) {
 bool PlatformFile::FileWrite(FileHandle& hFile, char* buffer, int write_size) {
   std::lock_guard<std::mutex> lock(file_mtx_);
 
+  const int max_attempts = 3;
+  int attempt = 0;
+  bool success = false;
+
 #ifdef _WIN32
   DWORD bytesWritten = 0;
-  if (!WriteFile(hFile, buffer, write_size, &bytesWritten, NULL)) {
+  while (attempt < max_attempts) {
+    if (WriteFile(hFile, buffer, write_size, &bytesWritten, NULL)) {
+      success = true;
+      break;
+    }
+    ++attempt;
     int last_error = GetLastError();
-    SPDLOG_ERROR("Failed to write to file [{}], error msg[{}]", file_name_.c_str(), last_error);
+    SPDLOG_ERROR("Failed to write to file [{}], attempt [{}], error msg[{}]", file_name_.c_str(), attempt, last_error);
+  }
+  if (!success) {
     hFile = InvalidHandle;
     return false;
   }
 #else
-  ssize_t written = ::write(hFile, buffer, write_size);
-  if (written == -1) {
-     SPDLOG_ERROR("Failed to write to file [{}], error msg[{}]", file_name_.c_str(), strerror(errno));
+  ssize_t written = -1;
+  while (attempt < max_attempts) {
+    written = ::write(hFile, buffer, write_size);
+    if (written != -1) {
+      success = true;
+      break;
+    }
+    ++attempt;
+    SPDLOG_ERROR("Failed to write to file [{}], attempt [{}], error msg[{}]", file_name_.c_str(), attempt, strerror(errno));
+  }
+  if (!success) {
     try {
       if (!close(hFile)) {
         throw std::runtime_error("Failed to close file handle.");
@@ -129,6 +151,7 @@ bool PlatformFile::FileWrite(FileHandle& hFile, char* buffer, int write_size) {
       std::cerr << "Error: " << e.what() << std::endl;
       return false;
     }
+    return false;
   }
 #endif
 

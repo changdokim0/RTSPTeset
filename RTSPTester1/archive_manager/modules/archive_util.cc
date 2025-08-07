@@ -34,7 +34,7 @@
 
 short ArchiveUtil::GetPageSize() {
 #ifdef _WIN32
-  SYSTEM_INFO si;
+  SYSTEM_INFO si = {};
   GetSystemInfo(&si);
   return si.dwPageSize;
 #else
@@ -50,23 +50,23 @@ void ArchiveUtil::SetZeroAfter(void* buffer, size_t size, size_t offset) {
 
 
 int ArchiveUtil::PercentAvailableMemorySize() {
-  int percect = 80;
+  int percent = 80;
 #ifdef _WIN32
-  MEMORYSTATUSEX memoryStatus;
+  MEMORYSTATUSEX memoryStatus = {};
   memoryStatus.dwLength = sizeof(memoryStatus);
-  if (GlobalMemoryStatusEx(&memoryStatus)) {
+  if (GlobalMemoryStatusEx(&memoryStatus) && 0 != memoryStatus.ullTotalPhys) {
     //std::cout << "[ArchiveL] Total physical memory: " << memoryStatus.ullTotalPhys / (1024 * 1024) << " MB" << std::endl;
     //std::cout << "[ArchiveL] Used physical memory: " << (memoryStatus.ullTotalPhys - memoryStatus.ullAvailPhys) / (1024 * 1024) << " MB" << std::endl;
     //std::cout << "[ArchiveL] Free physical memory: " << memoryStatus.ullAvailPhys / (1024 * 1024) << " MB" << std::endl;
 
     long long totalsize = memoryStatus.ullTotalPhys;
     long long usedsize = memoryStatus.ullAvailPhys;
-    percect = (float(memoryStatus.ullTotalPhys - memoryStatus.ullAvailPhys) / (float)(memoryStatus.ullTotalPhys) * 100);
+    percent = (float(memoryStatus.ullTotalPhys - memoryStatus.ullAvailPhys) / (float)(memoryStatus.ullTotalPhys) * 100);
   } else {
     std::cerr << "Error retrieving memory status." << std::endl;
   }
 #else
-  struct sysinfo memInfo;
+  struct sysinfo memInfo = {};
   if (sysinfo(&memInfo) != 0) {
     std::cerr << "sysinfo() failed: " << std::endl;
     return 100;
@@ -78,7 +78,26 @@ int ArchiveUtil::PercentAvailableMemorySize() {
   long long freePhysMem = memInfo.freeram;
   freePhysMem *= memInfo.mem_unit;
 
-  percect = (float(totalPhysMem - freePhysMem) / (float)(totalPhysMem) * 100);
+  if (0 != totalPhysMem) {
+    percent = (float(totalPhysMem - freePhysMem) / (float)(totalPhysMem) * 100);
+  } else {
+    std::cerr << "Error retrieving memory status." << std::endl;
+  }
 #endif
-  return percect;
+  return percent;
+}
+
+void ArchiveUtil::RemoveIfEmpty(const std::filesystem::path& path, const std::string& folder_type) {
+  std::error_code ec;
+  if (!std::filesystem::exists(path, ec)) {
+    return;
+  }
+  if (std::filesystem::is_empty(path)) {
+    std::filesystem::remove(path, ec);
+    if (ec) {
+      SPDLOG_WARN("Failed to remove empty {} folder: {} ({})", folder_type, path.string(), ec.message());
+    } else {
+      SPDLOG_INFO("Removed empty {} folder: {}", folder_type, path.string());
+    }
+  }
 }

@@ -61,13 +61,13 @@
 
 class IOWorker {
  public:
-  IOWorker(std::string session_id, MediaProfile profile);
+  IOWorker(SessionID session_id);
   ~IOWorker();
 
   void SetPath(std::filesystem::path save_path);
   void SetStreamID(std::string stream_id) { stream_id_ = stream_id; }
   std::string GetStreamID() { return stream_id_; }
-  std::string GetSessionID() { return session_id_; }
+  std::string GetChannelUUID() { return channel_uuid_; }
   void SetDataEncryption(EncryptionType encrytion_type) { encrytion_type_ = encrytion_type; }
 
   bool PushVideoChunkBuffer(std::filesystem::path save_driver, std::shared_ptr<ArchiveChunkBuffer> media_datas);
@@ -80,15 +80,17 @@ class IOWorker {
   std::optional<std::pair<ArchiveIndexHeader, ArchiveObject>> GetNextFrame();
   void Flush();
 
-  std::function<void(SessionID session_id, MediaProfile profile, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>>)> callback_write_status_iwtaw_;
-  void CallbackWirteStatusIWTAW(SessionID session_id, MediaProfile profile, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>> infos) {
+  std::function<void(SessionID session_id, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>>)>
+      callback_write_status_iwtaw_;
+  void CallbackWirteStatusIWTAW(SessionID session_id, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>> infos) {
     if (callback_write_status_iwtaw_) {
-      callback_write_status_iwtaw_(session_id, profile_, success, infos);
+      callback_write_status_iwtaw_(session_id, success, infos);
     }
   }
 
  private:
   SessionID session_id_;
+  ChannelUUID channel_uuid_;
   std::string stream_id_ = "";
   MediaProfile profile_;
   std::filesystem::path save_driver_;
@@ -120,7 +122,7 @@ class IOWorker {
   int file_random_number_ = 0;
   int buffer_size_ = IOWORKER_QUEUE_MAX_COUNT;
 
-  std::mutex mmy_buf_mtx_;
+  std::mutex mmy_buf_mtx_, write_process_mtx_;
   std::vector<std::shared_ptr<BaseBuffer>> memory_buffer_frames;
   // Calculation
   BitrateMonitor bitrate_monitor_;

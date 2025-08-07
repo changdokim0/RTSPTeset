@@ -60,12 +60,12 @@ class ARCHIVE_MANAGER_API ArchiveChunkBuffer : public BaseBuffer {
   bool IsIncludedTime(unsigned long long timestamp_msec);
   std::shared_ptr<std::vector<FrameWriteIndexData>> GetFrameInfos(std::string driver);
   int GetHeadersSize();
-  void SetChunkTotalSize(unsigned int total_data_size) { total_data_size_ = total_data_size; }
+  void SetChunkTotalSize(unsigned int total_data_size) { std::lock_guard<std::mutex> lock(buffer_mtx_); total_data_size_ = total_data_size; }
 
   void TrimToLastGOP();
 
-  std::list<std::shared_ptr<StreamBuffer>>::const_iterator begin() const { return chunk_block_buffers_.begin(); }
-  std::list<std::shared_ptr<StreamBuffer>>::const_iterator end() const { return chunk_block_buffers_.end(); }
+  std::list<std::shared_ptr<StreamBuffer>>::const_iterator begin() { std::lock_guard<std::mutex> lock(buffer_mtx_); return chunk_block_buffers_.begin(); }
+  std::list<std::shared_ptr<StreamBuffer>>::const_iterator end()  { std::lock_guard<std::mutex> lock(buffer_mtx_); return chunk_block_buffers_.end(); }
 
  private:
   int GetInternalHeaderSize();

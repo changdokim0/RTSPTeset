@@ -35,16 +35,26 @@ ArchiveWorker::ArchiveWorker(std::string driver) : driver_(driver) {
 }
 
 ArchiveWorker::~ArchiveWorker() {
-  std::cout << "ArchiveWorker - delete worker begin : " << driver_ << std::endl;
-  run_thread_ = false;
-  condition_release_ = true;
-  cv_.notify_one();
-  if (work_thread_) {
-    work_thread_->join();
-    delete work_thread_;
-    work_thread_ = nullptr;
-  }
-  std::cout << "ArchiveWorker - delete worker begin : " << driver_ << std::endl;
+ try {
+   std::cout << "ArchiveWorker - delete worker begin : " << driver_ << std::endl;
+   run_thread_ = false;
+   condition_release_ = true;
+   cv_.notify_one();
+   if (work_thread_) {
+     work_thread_->join();
+     delete work_thread_;
+     work_thread_ = nullptr;
+   }
+   std::cout << "ArchiveWorker - delete worker end : " << driver_ << std::endl;
+ } catch (const std::ios_base::failure& e) {
+   fprintf(stdout, "[%s:%d] std::ios_base::failure Exception caught in ArchiveWorker destructor: %s \n", __func__, __LINE__, e.what());
+ } catch (const std::system_error& e) {
+   fprintf(stdout, "[%s:%d] system_error Exception caught in ArchiveWorker destructor: %s \n", __func__, __LINE__, e.what());
+ } catch (const std::exception& e) {
+   fprintf(stdout, "[%s:%d] Exception caught in ArchiveWorker destructor: %s \n", __func__, __LINE__, e.what());
+ } catch (...) {
+   fprintf(stdout, "[%s:%d] Unknown exception caught in ArchiveWorker destructor. \n", __func__, __LINE__);
+ }
 }
 
 std::shared_ptr<IOWorker> ArchiveWorker::GetIOWorker(std::string stream_id) {
@@ -67,14 +77,14 @@ bool ArchiveWorker::RemoveIOWorker(std::string stream_id) {
   return true;
 }
 
-void ArchiveWorker::PushStream(SessionID session_id, std::shared_ptr<IOWorker> io_worker) {
-  std::shared_lock<std::shared_mutex> lock(mtx_ioworkers_);
-  std::cout << "PushStream :" << session_id << std::endl;
-  io_workers_[session_id] = io_worker;
+void ArchiveWorker::PushStream(std::string stream_id, std::shared_ptr<IOWorker> io_worker) {
+  std::unique_lock<std::shared_mutex> lock(mtx_ioworkers_);
+  std::cout << "PushStream :" << stream_id << std::endl;
+  io_workers_[stream_id] = io_worker;
 }
 
-bool ArchiveWorker::AddStream(SessionID session_id, MediaProfile profile) {
-  std::string stream_id = GetStreamID(session_id, profile);
+bool ArchiveWorker::AddStream(SessionID session_id) {
+  std::string stream_id = GetStreamID(session_id);
   std::shared_ptr<IOWorker> ioworkerptr = nullptr;
   {
     std::unique_lock<std::shared_mutex> lock(mtx_ioworkers_);
@@ -84,53 +94,55 @@ bool ArchiveWorker::AddStream(SessionID session_id, MediaProfile profile) {
 
     std::cout << "AddStream :" << stream_id << std::endl;
 
-    std::shared_ptr<IOWorker> io_w = std::make_shared<IOWorker>(session_id, profile);
+    std::shared_ptr<IOWorker> io_w = std::make_shared<IOWorker>(session_id);
     io_w->SetPath(save_path_);
     io_w->SetStreamID(stream_id);
     io_w->callback_write_status_iwtaw_ =
-        std::bind(&ArchiveWorker::CallbackWirteStatusIWTAW, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4);
+        std::bind(&ArchiveWorker::CallbackWirteStatusIWTAW, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
     io_workers_.emplace(stream_id, io_w);
   }
 
   return true;
 }
 
-bool ArchiveWorker::DeleteStream(SessionID session_id, MediaProfile profile) {
-  std::string stream_id = GetStreamID(session_id, profile);
+bool ArchiveWorker::DeleteStream(SessionID session_id) {
+  std::string stream_id = GetStreamID(session_id);
   { 
     std::unique_lock<std::shared_mutex> lock(mtx_io_delete_);
     std::unique_lock<std::shared_mutex> lock2(mtx_ioworkers_);
     auto it = io_workers_.find(stream_id);
     if (it != io_workers_.end()) {
-      SPDLOG_INFO("DeleteStream stream_id[{}], profile[{}]", stream_id.c_str(), profile.ToString());
+      SPDLOG_INFO("DeleteStream stream_id[{}], profile[{}]", stream_id.c_str(), session_id.profile.ToString());
       io_workers_.erase(it);
     } else {
-      SPDLOG_ERROR("(DeleteStream) couldn't find  stream_id[{}], profile[{}]", stream_id.c_str(), profile.ToString());
+      SPDLOG_ERROR("(DeleteStream) couldn't find  stream_id[{}], profile[{}]", stream_id.c_str(), session_id.profile.ToString());
       return false;
     }
   }
   return true;
 }
 
-bool ArchiveWorker::Flush(SessionID session_id, MediaProfile profile) {
-  std::string stream_id = GetStreamID(session_id, profile);
+bool ArchiveWorker::Flush(SessionID session_id) {
+  std::string stream_id = GetStreamID(session_id);
   {
     std::shared_lock<std::shared_mutex> lock(mtx_ioworkers_);
     auto it = io_workers_.find(stream_id);
     if (it != io_workers_.end()) {
-      SPDLOG_INFO("Flush stream_id[{}], profile[{}]", stream_id.c_str(), profile.ToString());
+      SPDLOG_INFO("Flush stream_id[{}], profile[{}]", stream_id.c_str(), session_id.profile.ToString());
       it->second->Flush();
     } else {
-      SPDLOG_ERROR("(Flush) couldn't find  stream_id[{}], profile[{}]", stream_id.c_str(), profile.ToString());
+      SPDLOG_ERROR("(Flush) couldn't find  stream_id[{}], profile[{}]", stream_id.c_str(), session_id.profile.ToString());
       return false;
     }
   }
+  condition_release_ = true;
+  cv_.notify_one();
   return true;
 }
 
-bool ArchiveWorker::SetDataEncryption(SessionID session_id, MediaProfile profile, EncryptionType encrytion_type) {
+bool ArchiveWorker::SetDataEncryption(SessionID session_id,  EncryptionType encrytion_type) {
   bool ret = false;
-  std::string stream_id = GetStreamID(session_id, profile);
+  std::string stream_id = GetStreamID(session_id);
   {
     std::shared_lock<std::shared_mutex> lock(mtx_ioworkers_);
     if (io_workers_.find(stream_id) == io_workers_.end()) {
@@ -152,12 +164,21 @@ void ArchiveWorker::RunWorkThread() {
       mtx_io_delete_.lock_shared();
       mtx_ioworkers_.lock_shared();
 
-      //std::cout << "std::transform" << std::endl;
-      std::transform(io_workers_.begin(), io_workers_.end(), std::back_inserter(io_workers_v), [](const auto& pair) { return pair.second; });
+      try {
+        for (const auto& pair : io_workers_) {
+          if (pair.second != nullptr) {
+            io_workers_v.push_back(pair.second);
+          }
+        }
+      } catch (const std::exception& e) {
+        SPDLOG_ERROR("Exception occurred while iterating io_workers_: {}", e.what());
+      } catch (...) {
+        SPDLOG_ERROR("Unknown exception occurred while iterating io_workers_");
+      }
       mtx_ioworkers_.unlock_shared();
 
       time_t current_time = time(nullptr);
-      unsigned int timestamp = static_cast<unsigned int>(current_time);
+      unsigned int timestamp = static_cast<unsigned int>(current_time % UINT_MAX);
       for (auto io_worker : io_workers_v) {
         worked = io_worker->ProcessBuffer(timestamp);
       }
@@ -174,9 +195,10 @@ void ArchiveWorker::RunWorkThread() {
   });
 }
 
-bool ArchiveWorker::PushVideoChunkBuffer(SessionID session_id, MediaProfile profile, std::string save_driver, std::shared_ptr<ArchiveChunkBuffer> media_datas) {
+bool ArchiveWorker::PushVideoChunkBuffer(SessionID session_id, std::string save_driver,
+                                         std::shared_ptr<ArchiveChunkBuffer> media_datas) {
   bool ret = false;
-  std::string stream_id = GetStreamID(session_id, profile);
+  std::string stream_id = GetStreamID(session_id);
   {
     std::shared_lock<std::shared_mutex> lock(mtx_ioworkers_);
     if (io_workers_.find(stream_id) == io_workers_.end()) {
@@ -228,7 +250,7 @@ std::optional<std::pair<ArchiveIndexHeader, ArchiveObject>> ArchiveWorker::GetNe
   return media_object;
 }
 
-void ArchiveWorker::CallbackWirteStatusIWTAW(SessionID session_id, MediaProfile profile, bool success,
+void ArchiveWorker::CallbackWirteStatusIWTAW(SessionID session_id, bool success,
                                              std::shared_ptr<std::vector<FrameWriteIndexData>> infos) {
-  CallbackWirteStatusAWTAM(session_id, profile, success, infos);
+  CallbackWirteStatusAWTAM(session_id, success, infos);
 }

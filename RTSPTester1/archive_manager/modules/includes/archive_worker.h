@@ -47,15 +47,15 @@ class ArchiveWorker {
   // device
   void SetSavePath(std::filesystem::path save_path) { save_path_ = save_path; }
 
-  std::shared_ptr<IOWorker> GetIOWorker(SessionID session_id);
-  std::map<std::string, std::shared_ptr<IOWorker>> GetIOWorkers() { return io_workers_; };
-  bool AddStream(SessionID session_id, MediaProfile profile);
-  bool DeleteStream(SessionID session_id, MediaProfile profile);
-  bool Flush(SessionID session_id, MediaProfile profile);
+  std::shared_ptr<IOWorker> GetIOWorker(std::string session_id);
+  std::map<std::string, std::shared_ptr<IOWorker>> GetIOWorkers() { std::shared_lock<std::shared_mutex> lock(mtx_ioworkers_); return io_workers_; };
+  bool AddStream(SessionID session_id);
+  bool DeleteStream(SessionID session_id);
+  bool Flush(SessionID session_id);
   bool RemoveIOWorker(std::string stream_id);
-  void PushStream(SessionID session_id, std::shared_ptr<IOWorker> io_worker);
-  bool SetDataEncryption(SessionID session_id, MediaProfile profile, EncryptionType encrytion_type);
-  bool PushVideoChunkBuffer(SessionID session_id, MediaProfile profile, std::string save_driver, std::shared_ptr<ArchiveChunkBuffer> media_datas);
+  void PushStream(std::string stream_id, std::shared_ptr<IOWorker> io_worker);
+  bool SetDataEncryption(SessionID session_id, EncryptionType encrytion_type);
+  bool PushVideoChunkBuffer(SessionID session_id, std::string save_driver, std::shared_ptr<ArchiveChunkBuffer> media_datas);
 
   // information
   std::optional<std::pair<ArchiveIndexHeader, ArchiveObject>> GetFrame(SessionID session_id, int time_stamp, std::shared_ptr<ReaderObject> read_object);
@@ -65,15 +65,16 @@ class ArchiveWorker {
   std::optional<std::pair<ArchiveIndexHeader, ArchiveObject>> GetNextFrame(SessionID session_id, std::shared_ptr<ReaderObject> read_object);
 
   //callback aw -> am
-  std::function<void(SessionID session_id, MediaProfile profile, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>>)> callback_write_status_awtam_;
-  void CallbackWirteStatusAWTAM(SessionID session_id, MediaProfile profile, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>> infos) {
+  std::function<void(SessionID session_id, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>>)>
+      callback_write_status_awtam_;
+  void CallbackWirteStatusAWTAM(SessionID session_id, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>> infos) {
     if (callback_write_status_awtam_) {
-      callback_write_status_awtam_(session_id, profile, success, infos);
+      callback_write_status_awtam_(session_id, success, infos);
     }
   }
 
   //callback iow -> aw
-  void CallbackWirteStatusIWTAW(SessionID session_id, MediaProfile profile, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>> value);
+  void CallbackWirteStatusIWTAW(SessionID session_id, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>> value);
 
  private:
   std::filesystem::path driver_ = "";

@@ -50,10 +50,10 @@ class ReaderWorker
   void DelDrive(std::filesystem::path drive);
   void SetData(std::filesystem::path save_path);
 
-  std::shared_ptr<std::deque<Archive_FileInfo>> GetNearestFile(std::vector<std::filesystem::path> drives, SessionID session_id, unsigned int time_stamp,
+  std::shared_ptr<std::deque<Archive_FileInfo>> GetNearestFile(std::vector<std::filesystem::path> drives, ChannelUUID channel_uuid, unsigned int time_stamp,
                                                                 MediaProfile profile_type, ArchiveReadType archive_read_type, bool is_include_curfile = false);
 
-  bool Seek(SessionID session_id, unsigned long long time_stamp_msec, ArchiveReadType archive_read_type, std::shared_ptr<ReaderObject> read_object);
+  bool Seek(ChannelUUID channel_uuid, unsigned long long time_stamp_msec, ArchiveReadType archive_read_type, std::shared_ptr<ReaderObject> read_object);
   std::shared_ptr<ArchiveChunkBuffer> GetStreamChunk(ArchiveChunkReadType gov_read_type, std::shared_ptr<ReaderObject> read_object);
   std::shared_ptr<ArchiveChunkBuffer> GetStreamGop(ArchiveChunkReadType gov_read_type, std::shared_ptr<ReaderObject> read_object);
 
@@ -66,7 +66,6 @@ class ReaderWorker
   std::filesystem::path save_path_;
   std::mutex drive_mtx_;
   std::filesystem::path drive_;
-  unsigned int cur_time_stamp_;
 
   bool ParseHeader(std::string file_name, std::shared_ptr<ReaderObject> read_object);
   time_t getNextHourLastSecond(time_t timestamp, int add_hour, ArchiveReadType archive_read_type);

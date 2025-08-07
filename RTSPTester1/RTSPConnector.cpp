@@ -181,7 +181,7 @@ int RTSPConnector::ServerConnect(std::string strIP, int rtsp_port, std::string d
 	mSrcUrl += "/";
 	mSrcUrl += profile;
 	m_profile_ = profile;
-
+	mSrcUrl = "rtsp://192.168.171.233:554/0/recording/backup.smp";
 	if (m_rtspClient->openURL(mSrcUrl.c_str(), 1, timeout) == 0)
 	{
 		if (m_rtspClient->playURL((FrameHandlerFunc)frameHandlerFunc, m_rtspClient, NULL, NULL) == 0)

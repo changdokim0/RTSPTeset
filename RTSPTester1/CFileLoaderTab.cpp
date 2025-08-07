@@ -239,8 +239,10 @@ CString CFileLoaderTab::GetTypeString(int type) {
 void CFileLoaderTab::MakeTree() {
 	m_listCtrl.DeleteAllItems();
 	int nIndex = 0, list_index = 0;
+	long long prev_time_stamp = 0;
 	CString strItemText;
 	m_listCtrl.SetRedraw(FALSE);
+	int nframesize = 0;
 	for (auto buffers: buffers_all_) {
 		strItemText.Format(_T("%d"), nIndex++);
 		//HTREEITEM hChild = m_FileLoaderTreeCtrl.InsertItem(strItemText, tree_root_, TVI_LAST);
@@ -253,6 +255,7 @@ void CFileLoaderTab::MakeTree() {
 			CString frame_Type = _T("");
 			CString codec_Type = _T("");
 			if (auto video = std::dynamic_pointer_cast<VideoData>(buffer)) {
+				nframesize++;
 				if(video->archive_header.codecType == Pnx::Media::VideoCodecType::H265)
 					codec_Type = _T("H265");
 				else if (video->archive_header.codecType == Pnx::Media::VideoCodecType::H264)
@@ -260,13 +263,21 @@ void CFileLoaderTab::MakeTree() {
 				else
 					codec_Type = _T("Unknown");
 
-				if (video->archive_header.frameType == Pnx::Media::VideoFrameType::I_FRAME)
+				if (video->archive_header.frameType == Pnx::Media::VideoFrameType::I_FRAME) {
+					nframesize = 0;
 					frame_Type = _T("I_FRAME");
+				}
 				else if (video->archive_header.frameType == Pnx::Media::VideoFrameType::P_FRAME)
 					frame_Type = _T("P_FRAME");
 				else
 					frame_Type = _T("Unknown");
 				strFrameSize.Format(_T("%dx%d"), video->archive_header.width, video->archive_header.height);
+
+
+				long long gap_timestamp = buffer->timestamp_msec - prev_time_stamp;
+				std::cout << "gap_timestamp: " << gap_timestamp << std::endl;
+				prev_time_stamp = buffer->timestamp_msec;
+
 			}
 			strPacketSize.Format(_T("%d"), buffer->packet_size);
 			CString buffer_info;

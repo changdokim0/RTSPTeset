@@ -33,19 +33,35 @@
 #include "define_time.h"
 #include "Pnx++/Media/MediaDefine.h"
 #include "Pnx++/Media/MediaSourceFrame.h"
+//#include "Pnx++/Media/MediaOutputFrame.h"
 
 struct MediaProfile {
  public:
-  enum EProfile { kPrimary = 0, kSecondary, kAuto, kUnknown };
+  enum EProfile { kAuto = 0, kPrimary = 1, kSecondary, kTertiary, kUnknown };
 
   MediaProfile(){};
   MediaProfile(EProfile profile) : profile_(profile){};
+  MediaProfile(int profile) {
+    SetProfile(profile);
+  };
   MediaProfile operator=(MediaProfile::EProfile profile) {
     profile_ = profile;
     return *this;
   }
   MediaProfile operator=(const MediaProfile& profile) {
     profile_ = profile.profile_;
+    is_flexible_ = profile.is_flexible_;
+    inter_name = profile.inter_name;
+    support_live_url = profile.support_live_url;
+    support_record = profile.support_record;
+    support_live = profile.support_live;
+    support_meta_parse = profile.support_meta_parse;
+    support_meta_event = profile.support_meta_event;
+    support_meta_image = profile.support_meta_image;
+    support_meta_record = profile.support_meta_record;
+    support_server_md = profile.support_server_md;
+    support_reid_human = profile.support_reid_human;
+    support_reid_face = profile.support_reid_face;
     return *this;
   }
   bool operator==(const MediaProfile::EProfile profile) const { return profile == profile_; };
@@ -54,13 +70,28 @@ struct MediaProfile {
   bool operator<(const MediaProfile profile) const { return profile.ToInt() < ToInt(); };
   bool operator==(const MediaProfile profile) const { return profile.profile_ == profile_; };
   bool operator!=(const MediaProfile profile) const { return profile.profile_ != profile_; };
-  EProfile ToEProfile() const { return profile_; };
-  std::string ToString(void) { return ToString(profile_); };
+  EProfile ToEProfile(void) const { return profile_; };
+  static const EProfile ToEProfile(const std::string& str_profile) {
+    if (str_profile == "primary")
+      return kPrimary;
+    if (str_profile == "secondary")
+      return kSecondary;
+    if (str_profile == "tertiary")
+      return kTertiary;
+    if (str_profile == "auto")
+      return kAuto;
+    return kUnknown;
+  };
+  std::string ToString(void) const { return ToString(profile_); };
   static const std::string ToString(MediaProfile::EProfile profile) {
     if (profile == kPrimary) {
       return "primary";
     } else if (profile == kSecondary) {
       return "secondary";
+    } else if (profile == kTertiary) {
+      return "tertiary";
+    } else if (profile == kAuto) {
+      return "auto";
     } else {
       return "unknown";
     }
@@ -74,6 +105,24 @@ struct MediaProfile {
   bool IsFlexible(void) const {
     return profile_ == kAuto ? true : is_flexible_;
   }
+  void SetProfile(int int_profile) {
+    if (int_profile < kAuto || int_profile > kUnknown) {
+      profile_ = kUnknown;
+    } else {
+      profile_ = (EProfile)int_profile;
+    }
+  }
+  std::string inter_name;
+  bool support_live_url = true;
+  bool support_record = true;
+  bool support_live = true;
+  bool support_meta_parse = true;
+  bool support_meta_event = true;
+  bool support_meta_image = true;
+  bool support_meta_record = true;
+  bool support_server_md = true;
+  bool support_reid_human = false;
+  bool support_reid_face = false;
  private:
   EProfile profile_ = kUnknown;
   bool is_flexible_ = false;
@@ -93,6 +142,7 @@ struct PhoenixPlayInfo {
   bool d_flag = false;
   bool t_flag = false;
   bool p_flag = false;
+  unsigned char profile = 0;
 };
 
 typedef std::string ChannelUUID;
@@ -102,6 +152,11 @@ typedef std::string ClientSessionUUID;
 struct PnxMedia {
   PnxMedia() : first_address_(this){};  // Temporary just for debuging. TODO (hyo-jin.kim) : remove later.
   virtual ~PnxMedia(){};
+
+  PnxMedia(const PnxMedia&) = default;
+  PnxMedia& operator=(const PnxMedia&) = default;
+  PnxMedia(PnxMedia&&) noexcept = default;
+  PnxMedia& operator=(PnxMedia&&) noexcept = default;
 
  private:
   void* first_address_;
@@ -183,6 +238,14 @@ struct PnxMediaDataGroup : virtual PnxMediaInfo {
     data_vector_->erase(data_vector_->begin());
     return ret;
   }
+  std::shared_ptr<PnxMediaData> PopBack() {
+    if (GetNumber() <= 0) {
+      return nullptr;
+    }
+    std::shared_ptr<PnxMediaData> ret = data_vector_->back();
+    data_vector_->pop_back();
+    return ret;
+  }
   size_t GetNumber() { return data_vector_->size(); };
 
  public:
@@ -207,6 +270,7 @@ struct PnxMediaArchiveInfo : virtual PnxMediaInfo {
   std::filesystem::path GetArchivingDrive(void) const { return drive_; };
 
  public:
+  enum EPurpose { kRecord = 0, kBackup };
   PnxMediaArchiveInfo operator=(const PnxMediaInfo& a) {
     _CopyMediaInfo(a);
     return *this;
@@ -216,10 +280,12 @@ struct PnxMediaArchiveInfo : virtual PnxMediaInfo {
     return *this;
   }
 
+  EPurpose purpose_ = kRecord;
  protected:
   void _CopyMediaArchiveInfo(const PnxMediaArchiveInfo& a) {
     _CopyMediaInfo(a);
     this->drive_ = a.drive_;
+    this->purpose_ = a.purpose_;
   }
   std::filesystem::path drive_;
 };
@@ -238,10 +304,6 @@ struct PnxMediaArchiveData : PnxMediaArchiveInfo, PnxMediaData {
     _CopyMediaData(a);
     return *this;
   }
-};
-
-struct PnxMediaArchiveDataEx : PnxMediaArchiveData {
-  std::shared_ptr<PnxMedia> ex_data;
 };
 
 struct PnxMediaArchiveDataGroup : PnxMediaArchiveInfo, PnxMediaDataGroup {
@@ -271,4 +333,28 @@ struct PnxMediaBackchannelData : virtual PnxMediaInfo {
       _CopyMediaInfo(a);
       data = a.data;
     };
+};
+
+struct PnxArchiveResult : virtual PnxMediaInfo {
+  std::string drive_ = "";
+  bool write_success_ = false;
+  int64_t last_written_time_ = 0;
+
+ public:
+  PnxArchiveResult operator=(const PnxMediaInfo& a) {
+    _CopyMediaInfo(a);
+    return *this;
+  }
+  PnxArchiveResult operator=(const PnxArchiveResult& a) {
+    _CopyMediaData(a);
+    return *this;
+  }
+
+ protected:
+  void _CopyMediaData(const PnxArchiveResult& a) {
+    _CopyMediaInfo(a);
+    drive_ = a.drive_;
+    write_success_ = a.write_success_;
+    last_written_time_ = a.last_written_time_;
+  };
 };
