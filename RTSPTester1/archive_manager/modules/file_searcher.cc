@@ -59,9 +59,9 @@ std::optional<std::vector<std::string>> FileSearcher::GetFilesAndFolders(const s
   return result;
 }
 
-std::string FileSearcher::GetFolderFrTime(long long data_time) {
+std::string FileSearcher::GetFolderFrTime(unsigned long long data_time) {
   std::string file_time;
-  std::time_t timestamp = static_cast<std::time_t>(data_time);
+  std::time_t timestamp = static_cast<std::time_t>(data_time / 1000);
   std::tm* timeinfo = std::gmtime(&timestamp);
   std::tm local_time;
   if (timeinfo == nullptr) {
@@ -175,7 +175,7 @@ std::optional<std::string> FileSearcher::GetNearestFolder(fs::path base_path, fs
 
 // Just send the closest file from the entire drive.
 std::optional<std::vector<Archive_FileInfo>> FileSearcher::GetNearestFileNames(fs::path drive, fs::path base_directory, std::string session_id,
-                                                                          unsigned int data_time, MediaProfile profile,
+                                                                               unsigned long long data_time, MediaProfile profile,
                                                                                ArchiveReadType archive_read_type, bool is_include_curfile) {
   std::vector<Archive_FileInfo> paths;
 
@@ -190,8 +190,9 @@ std::optional<std::vector<Archive_FileInfo>> FileSearcher::GetNearestFileNames(f
   if (kArchiveReadPrev == archive_read_type)
     next_term *= -1;
 
+  next_term *= 1000;
   for (int i = 0; i < 2; i++) {
-    unsigned int search_time = data_time + (i * next_term); 
+    unsigned long long search_time = data_time + (i * next_term); 
     std::string filename_frtime = GetFolderFrTime(search_time);
     fs::path dir_path = base_path / session_id / filename_frtime;
     dir_path = dir_path.generic_string();
@@ -207,7 +208,7 @@ std::optional<std::vector<Archive_FileInfo>> FileSearcher::GetNearestFileNames(f
           if (file_name.find(profile.ToString()) == std::string::npos)
             continue;
 
-          int timestamp = ParseFileNameToTimestamp(file_name);
+          unsigned long long  timestamp = ParseFileNameToTimestamp(file_name);
           if (timestamp > 0) {
             paths.push_back(Archive_FileInfo(file_name, dir_path.string(), timestamp));
           }
@@ -276,7 +277,7 @@ std::optional<std::vector<Archive_FileInfo>> FileSearcher::GetNearestFileNames(f
       continue;
     } else {
       for (const auto& file_name : search_files.value()) {
-        int timestamp = ParseFileNameToTimestamp(file_name);
+        unsigned long long timestamp = ParseFileNameToTimestamp(file_name);
         if (timestamp > 0) {
           std::string path = media_path.string() + "/" + near_folder_name.value();
           paths.push_back(Archive_FileInfo(file_name, path, timestamp));
@@ -350,11 +351,11 @@ unsigned int FileSearcher::TimestampFromFile(std::string file_path) {
   return static_cast<unsigned int>(timestamp % UINT_MAX);
 }
 
-unsigned int FileSearcher::ParseFileNameToTimestamp(std::string filename) {
+unsigned long long FileSearcher::ParseFileNameToTimestamp(std::string filename) {
   if (filename.size() < 15)
     return 0;
 
-  int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+  int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0, milli = 0;
   try {
     year = std::stoi(filename.substr(0, 4));
     month = std::stoi(filename.substr(4, 2));
@@ -362,10 +363,12 @@ unsigned int FileSearcher::ParseFileNameToTimestamp(std::string filename) {
     hour = std::stoi(filename.substr(8, 2));
     minute = std::stoi(filename.substr(10, 2));
     second = std::stoi(filename.substr(12, 2));
+    milli = std::stoi(filename.substr(14, 3));
   } catch (const std::invalid_argument& e) {
     std::cerr << "Error: " << e.what() << std::endl;
     return 0;
   }
+
   if (year < 1500 || year > 2200 || month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 24 || minute < 0 || minute > 60 || second < 0 ||
       second > 60)
     return 0;
@@ -377,10 +380,18 @@ unsigned int FileSearcher::ParseFileNameToTimestamp(std::string filename) {
   time_info.tm_hour = hour;
   time_info.tm_min = minute;
   time_info.tm_sec = second;
+
 #ifdef _WIN32
-  std::time_t gm_timestamp = _mkgmtime(&time_info);
+  std::time_t gm_timestamp = _mkgmtime(&time_info);  
 #else
   std::time_t gm_timestamp = timegm(&time_info);
 #endif
-  return static_cast<unsigned int>(gm_timestamp % UINT_MAX);
+
+  if (gm_timestamp == -1) {
+    std::cerr << "Error: Failed to convert time to timestamp." << std::endl;
+    return 0;
+  }
+
+  unsigned long long timestamp_ms = static_cast<unsigned long long>(gm_timestamp) * 1000 + milli;
+  return timestamp_ms;
 }

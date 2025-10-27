@@ -119,7 +119,14 @@ bool ArchiveManager::Flush(SessionID session_id) {
 }
 
 void ArchiveManager::ChangeArchiveSystemUUID(std::optional<std::string> prev_system_uuid, std::string target_system_uuid,
-                                             std::optional<std::string> prev_server_uuid, std::string target_server_uuid, std::function<void(bool)> callback) {
+                                             std::optional<std::string> prev_server_uuid, std::string target_server_uuid, std::string db_separator_name,
+                                             std::function<void(bool)> callback) {
+  if (prev_system_uuid == target_system_uuid && prev_server_uuid == target_server_uuid) {
+    SPDLOG_INFO("No changes in system or server UUIDs. Skipping move operation.");
+    callback(true);
+    return;
+  }
+
   std::thread([=, this]() {
     std::filesystem::path save_root_path = save_path_.parent_path().parent_path();
     std::filesystem::path target_base_path = save_root_path / target_system_uuid / target_server_uuid;
@@ -179,6 +186,9 @@ void ArchiveManager::ChangeArchiveSystemUUID(std::optional<std::string> prev_sys
               continue;
     
             std::string channel_name = channel_entry.path().filename().string();
+            if (channel_name == db_separator_name) {
+              continue;
+            }
             if (std::any_of(existing_channels.begin(), existing_channels.end(),
                             [&](const std::filesystem::path& p) { return p.filename() == channel_name; })) {
               continue;
@@ -205,6 +215,15 @@ void ArchiveManager::ChangeArchiveSystemUUID(std::optional<std::string> prev_sys
 
 void ArchiveManager::SetSavePath(std::filesystem::path save_path) {
   save_path_ = save_path;
+  std::shared_lock<std::shared_mutex> lock(mtx_worker);
+  for (const auto& worker : archive_workers) {
+    worker.second->SetSavePath(save_path);
+    std::map<std::string, std::shared_ptr<IOWorker>> io_workers = worker.second->GetIOWorkers();
+    for (const auto& io_worker : io_workers) {
+      io_worker.second->SetPath(save_path);
+    }
+  }
+
   reader_worker_.SetData(save_path_);
 }
 
@@ -309,14 +328,15 @@ bool ArchiveManager::Seek(ChannelUUID channel, const PnxMediaTime& time, Archive
   if (read_object == nullptr)
     return false;
   bool is_seek = true;
-  SPDLOG_INFO("[ArchiveL] Seek : channel : {}, time : {}, archive_read_type : {}", channel, time.ToMilliSeconds(), archive_read_type);
+  SPDLOG_INFO("[ArchiveL] Seek : channel : {}, time : {}, archive_read_type : {}, profile : {}", channel, time.ToMilliSeconds(), archive_read_type,
+              read_object->GetProfile().ToString());
   if (kArchiveReadNext == archive_read_type) {
     reader_worker_.Seek(channel, time.ToMilliSeconds(), kArchiveReadPrev, read_object);
     SPDLOG_INFO("[ArchiveL] Seek Next 1");
     if (read_object->IsInGOP(time)) {
       read_object->ClearFileList();
       while (true) {
-        if (read_object->GetCurrentPositionTime() < time.ToMilliSeconds()) {
+        if (read_object->GetChunkEndTime() < time.ToMilliSeconds()) {
           auto frame_data = reader_worker_.GetNextData(kArchiveTypeFrameVideo, read_object);
           if (frame_data == std::nullopt) {
             SPDLOG_ERROR("[ArchiveL] Seek Next frame null");
@@ -335,13 +355,24 @@ bool ArchiveManager::Seek(ChannelUUID channel, const PnxMediaTime& time, Archive
   return reader_worker_.Seek(channel, time.ToMilliSeconds(), archive_read_type, read_object);
 }
 
-std::shared_ptr<ArchiveChunkBuffer> ArchiveManager::GetStreamChunk(ArchiveChunkReadType gov_read_type,
-                                                            std::shared_ptr<ReaderObject> read_object) {
-  return reader_worker_.GetStreamChunk(gov_read_type, read_object);
+std::shared_ptr<ArchiveChunkBuffer> ArchiveManager::GetStreamChunk(ArchiveChunkReadType gov_read_type, std::shared_ptr<ReaderObject> read_object) {
+  auto chunk_buffer = reader_worker_.GetStreamChunk(gov_read_type, read_object);
+  if (chunk_buffer && read_object) {
+    SPDLOG_INFO("[ArchiveManager] GetStreamChunk ch_uuid: {}, ArchiveChunkReadType: {}, pos(ms): {}, chunk_begin(ms): {}, chunk_end(ms): {}",
+                read_object->GetSessionid(), static_cast<int>(gov_read_type), read_object->GetCurrentPositionTime(), chunk_buffer->GetChunkBeginTime(),
+                chunk_buffer->GetChunkEndTime());
+  }
+  return chunk_buffer;
 }
 
 std::shared_ptr<ArchiveChunkBuffer> ArchiveManager::GetStreamGop(ArchiveChunkReadType gov_read_type, std::shared_ptr<ReaderObject> read_object) {
-  return reader_worker_.GetStreamGop(gov_read_type, read_object);
+  auto chunk_buffer = reader_worker_.GetStreamGop(gov_read_type, read_object);
+  if (chunk_buffer && read_object) {
+    SPDLOG_INFO("[ArchiveManager] GetStreamGop ch_uuid: {}, ArchiveChunkReadType: {}, pos(ms): {}, chunk_begin(ms): {}, chunk_end(ms): {}",
+                read_object->GetSessionid(), static_cast<int>(gov_read_type), read_object->GetCurrentPositionTime(), chunk_buffer->GetChunkBeginTime(),
+                chunk_buffer->GetChunkEndTime());
+  }
+  return chunk_buffer;
 }
 
 // GetNextData,GetPrevData :  Data is provided according to ArchiveType. If none, it is provided sequentially.

@@ -13,7 +13,7 @@ CFileLoaderTab::CFileLoaderTab(CWnd* pParent /*=nullptr*/)
 	: CDialogEx(IDD_DLG_FILELOADER_DIALOG, pParent)
 {
 	strPathIni = _T("info.ini");
-
+	InitSeeker();
 }
 
 CFileLoaderTab::~CFileLoaderTab()
@@ -35,6 +35,8 @@ BEGIN_MESSAGE_MAP(CFileLoaderTab, CDialogEx)
 	ON_BN_CLICKED(IDC_BTN_FILELOAD_SEEK, &CFileLoaderTab::OnBnClickedBtnFileloadSeek)
 	ON_BN_CLICKED(IDC_BUTTON1, &CFileLoaderTab::OnBnClickedButton1)
 	ON_NOTIFY(LVN_ITEMCHANGED, IDC_LIST_FILELOADER, &CFileLoaderTab::OnListItemChanged)
+	ON_BN_CLICKED(IDC_BTN_FILELOAD_NEXT, &CFileLoaderTab::OnBnClickedBtnFileloadNext)
+	ON_BN_CLICKED(IDC_BTN_FILELOAD_GETGOP, &CFileLoaderTab::OnBnClickedBtnFileloadGetgop)
 END_MESSAGE_MAP()
 
 
@@ -58,6 +60,7 @@ BOOL CFileLoaderTab::OnInitDialog()
 	m_listCtrl.InsertColumn(LIST_ITEM_LOCALTIME, _T("Local time"), LVCFMT_LEFT, 160);
 
 	ffmpegWrapper.Initialize(CODEC_TYPE::H264);
+	m_FileSeekTimeEdit.SetWindowText("1760837129394");
 
 	return TRUE;  // return TRUE unless you set the focus to a control
 }
@@ -354,30 +357,6 @@ std::string CFileLoaderTab::formatTimestamp(long long timestampMs) {
 	return oss.str(); // 형식화된 문자열 반환
 }
 
-void CFileLoaderTab::OnBnClickedBtnFileloadSeek()
-{
-	//m_FileSeekTimeEdit.SetWindowText("1743740937080");
-	m_FileSeekTimeEdit.SetWindowText("1743740410123");
-	//return;
-	ArchiveReadType archive_read_type = kArchiveReadNext;
-	std::string channel = "132";
-	CString strSeekTime;
-	m_FileSeekTimeEdit.GetWindowText(strSeekTime);
-	long long seekTime = _ttoll(strSeekTime);
-	std::shared_ptr<ReaderObject> read_object = std::make_shared<ReaderObject>(MediaProfile::kSecondary);
-	bool ret = reader_worker_.Seek(channel, seekTime, archive_read_type, read_object);
-
-	for (int i = 0; i < 1000; i++) {
-		std::shared_ptr<ArchiveChunkBuffer> gops = reader_worker_.GetStreamGop(kArchiveChunkReadFull, read_object);
-		auto duration1 = formatTimestamp(gops->GetChunkBeginTime());
-		auto duration2 = formatTimestamp(gops->GetChunkEndTime());
-		std::optional<std::vector<std::shared_ptr<StreamBuffer>>> frame = reader_worker_.GetNextData(kArchiveTypeFrameVideo, read_object);
-		auto duration3 = formatTimestamp(frame->at(0)->timestamp_msec);
-	}
-	return;
-}
-
-
 void CFileLoaderTab::OnBnClickedButton1()
 {
 	//return;
@@ -390,8 +369,8 @@ void CFileLoaderTab::OnBnClickedButton1()
 	//std::shared_ptr<ArchiveChunkBuffer> data = read_object_.get()->GetStreamGop(ArchiveChunkReadType::kArchiveChunkReadTarget);
 
 	//std::optional<std::vector<std::shared_ptr<StreamBuffer>>> buffers = read_object_.get()->GetNextData(ArchiveType::kArchiveTypeFrameVideo);
-	reader_worker_.SetData("/Hanwha Vision/BLAZE server/Archive/cd.kim");
-	reader_worker_.AddDrive("C:");
+	reader_worker_.SetData("/Hanwha Vision/BLAZE server/Archive/257fa333-0b4d-4e2a-8a14-3db873078497/c0908d4b-e331-4688-b5fe-328eb7804dc1");
+	//reader_worker_.AddDrive("C:");
 	reader_worker_.AddDrive("D:");
 }
 
@@ -421,24 +400,45 @@ BOOL CFileLoaderTab::PreTranslateMessage(MSG* pMsg) {
 }
 
 void CFileLoaderTab::CopyToClipboard() {
-	if (m_listCtrl.GetSafeHwnd() != ::GetFocus()) {
-		return; // 활성화된 컨트롤이 CListCtrl이 아닐 경우 반환
-	}
-	int selectedItem = m_listCtrl.GetSelectionMark();
-	if (selectedItem != -1) {
-		CString itemText = m_listCtrl.GetItemText(selectedItem, 6);
+    if (m_listCtrl.GetSafeHwnd() != ::GetFocus()) {
+        return; // 활성화된 컨트롤이 CListCtrl이 아닐 경우 반환
+    }
 
-		// 클립보드에 복사
-		if (OpenClipboard()) {
-			EmptyClipboard();
-			HGLOBAL hGlob = GlobalAlloc(GMEM_FIXED, (itemText.GetLength() + 1) * sizeof(TCHAR));
-			if (hGlob) {
-				memcpy(hGlob, itemText.GetString(), (itemText.GetLength() + 1) * sizeof(TCHAR));
-				SetClipboardData(CF_TEXT, hGlob);
-			}
-		}
-			CloseClipboard();
-	}
+    CString itemText;
+    // 여러 행 선택 지원
+    int nItem = -1;
+    bool firstLine = true;
+    while ((nItem = m_listCtrl.GetNextItem(nItem, LVNI_SELECTED)) != -1) {
+        if (!firstLine) {
+            itemText += _T("\r\n"); // 다음 행은 줄바꿈으로 구분
+        }
+        firstLine = false;
+        for (int i = 0; i <= LIST_ITEM_LOCALTIME; i++) {
+            itemText += m_listCtrl.GetItemText(nItem, i);
+            if (i < LIST_ITEM_LOCALTIME) {
+                itemText += _T("\t"); // 컬럼은 탭으로 구분
+            }
+        }
+    }
+
+    // 클립보드에 복사
+    if (!itemText.IsEmpty() && OpenClipboard()) {
+        EmptyClipboard();
+#ifdef UNICODE
+        HGLOBAL hGlob = GlobalAlloc(GMEM_FIXED, (itemText.GetLength() + 1) * sizeof(wchar_t));
+        if (hGlob) {
+            memcpy(hGlob, itemText.GetString(), (itemText.GetLength() + 1) * sizeof(wchar_t));
+            SetClipboardData(CF_UNICODETEXT, hGlob);
+        }
+#else
+        HGLOBAL hGlob = GlobalAlloc(GMEM_FIXED, (itemText.GetLength() + 1) * sizeof(char));
+        if (hGlob) {
+            memcpy(hGlob, itemText.GetString(), (itemText.GetLength() + 1) * sizeof(char));
+            SetClipboardData(CF_TEXT, hGlob);
+        }
+#endif
+        CloseClipboard();
+    }
 }
 
 void CFileLoaderTab::PasteFromClipboard() {
@@ -459,3 +459,181 @@ void CFileLoaderTab::PasteFromClipboard() {
 		CloseClipboard();
 	}
 }
+
+
+
+///////////////////////////////////
+// Seek 관련
+///////////////////////////////////
+
+void CFileLoaderTab::OnBnClickedBtnFileloadSeek()
+{
+	CString strSeekTime;
+	m_FileSeekTimeEdit.GetWindowText(strSeekTime);
+	long long seekTime = _ttoll(strSeekTime);
+	uint32_t sec = seekTime / 1000;
+	uint32_t usec = uint32_t((seekTime % 1000) * 1000);
+	PnxMediaTime pnxSeekTime(sec, usec);
+	read_object_ = std::make_shared<ReaderObject>(MediaProfile::kPrimary);
+	Seeker("2524ebae-0174-45e4-9ed6-bf4fdeb7c0a6", pnxSeekTime, kArchiveReadNext, read_object_);
+
+	return;
+}
+
+void CFileLoaderTab::OnBnClickedBtnFileloadGetgop()
+{
+	std::shared_ptr<ArchiveChunkBuffer> group = GetStreamGop(kArchiveChunkReadTarget, read_object_);
+	if (group == nullptr) {
+		return;
+	}
+	auto ret = std::make_shared<PnxMediaDataGroup>();
+	bool has_marked_cflag = false;
+	PnxMediaTime first_video_time;
+	PnxMediaTime last_video_time;
+	int num_i_frames = 0;
+	for (std::shared_ptr<StreamBuffer> stream_buf = group->PopQueue(); stream_buf != nullptr; stream_buf = group->PopQueue()) {
+		CString gmtTime, localTime;
+		ConvertEpochToGMTAndLocalCString(stream_buf->timestamp_msec, gmtTime, localTime);
+
+		TRACE("time: %lld, GMT: %s, Local: %s\n",
+			stream_buf->timestamp_msec,
+			(LPCTSTR)gmtTime,
+			(LPCTSTR)localTime);
+	}
+}
+
+void CFileLoaderTab::OnBnClickedBtnFileloadNext()
+{
+	std::shared_ptr<PnxMediaDataGroup> datas = GetNextData(read_object_, 10, kArchiveTypeNone);
+	if (datas == nullptr)
+		return;
+
+	while (datas->GetNumber() > 0) {
+		auto data = datas->PopFront();
+		data->profile = MediaProfile::kAuto;
+		CString gmtTime, localTime;
+		ConvertEpochToGMTAndLocalCString(data->time_info.ToMilliSeconds(), gmtTime, localTime);
+
+		TRACE("time: %lld, GMT: %s, Local: %s\n",
+			data->time_info.ToMilliSeconds(),
+			(LPCTSTR)gmtTime,
+			(LPCTSTR)localTime);
+	}
+}
+
+
+void CFileLoaderTab::InitSeeker() {
+	reader_worker_.SetData("/Hanwha Vision/BLAZE server/Archive/257fa333-0b4d-4e2a-8a14-3db873078497/c0908d4b-e331-4688-b5fe-328eb7804dc1");
+	reader_worker_.AddDrive("D:");
+}
+bool CFileLoaderTab::Seeker(ChannelUUID channel, const PnxMediaTime& time, ArchiveReadType archive_read_type, std::shared_ptr<ReaderObject> read_object)
+{
+	if (read_object == nullptr)
+		return false;
+	bool is_seek = true;
+	/*SPDLOG_INFO("[ArchiveL] Seek : channel : {}, time : {}, archive_read_type : {}, profile : {}", channel, time.ToMilliSeconds(), archive_read_type,
+		read_object->GetProfile().ToString());*/
+	if (kArchiveReadNext == archive_read_type) {
+		reader_worker_.Seek(channel, time.ToMilliSeconds(), kArchiveReadPrev, read_object);
+		SPDLOG_INFO("[ArchiveL] Seek Next 1");
+		if (read_object->IsInGOP(time)) {
+			read_object->ClearFileList();
+			while (true) {
+				if (read_object->GetChunkEndTime() < time.ToMilliSeconds()) {
+					auto frame_data = reader_worker_.GetNextData(kArchiveTypeFrameVideo, read_object);
+					if (frame_data == std::nullopt) {
+						SPDLOG_ERROR("[ArchiveL] Seek Next frame null");
+						is_seek = false;
+						break;
+					}
+				}
+				else
+					break;
+			}
+
+			SPDLOG_INFO("[ArchiveL] Seek Next in Gop");
+			return is_seek;
+		}
+	}
+	SPDLOG_INFO("[ArchiveL] Seek - ");
+	return reader_worker_.Seek(channel, time.ToMilliSeconds(), archive_read_type, read_object);
+}
+
+std::shared_ptr<ArchiveChunkBuffer> CFileLoaderTab::GetStreamGop(ArchiveChunkReadType gov_read_type, std::shared_ptr<ReaderObject> read_object) {
+	auto chunk_buffer = reader_worker_.GetStreamGop(gov_read_type, read_object);
+	if (chunk_buffer && read_object) {
+		SPDLOG_INFO("[ArchiveManager] GetStreamGop ch_uuid: {}, ArchiveChunkReadType: {}, pos(ms): {}, chunk_begin(ms): {}, chunk_end(ms): {}",
+			read_object->GetSessionid(), static_cast<int>(gov_read_type), read_object->GetCurrentPositionTime(), chunk_buffer->GetChunkBeginTime(),
+			chunk_buffer->GetChunkEndTime());
+	}
+	return chunk_buffer;
+}
+std::shared_ptr<PnxMediaDataGroup> CFileLoaderTab::GetNextData(std::shared_ptr<ReaderObject> read_object,
+	const unsigned char cseq, ArchiveType get_video_type) {
+	std::optional<std::vector<std::shared_ptr<StreamBuffer>>> datas = reader_worker_.GetNextData(get_video_type, read_object);
+	if (datas == std::nullopt)
+		return nullptr;
+
+	//SPDLOG_INFO("[ArchiveL] GetNextData : frame time : {}\n", datas->begin()->get()->timestamp_msec);
+	std::shared_ptr<PnxMediaDataGroup> media_datas = std::make_shared<PnxMediaDataGroup>();
+
+	for (auto data : datas.value()) {
+		if (auto video = std::dynamic_pointer_cast<VideoData>(data)) {
+			auto video_data = std::dynamic_pointer_cast<Pnx::Media::VideoSourceFrame>(video.get()->buffer);
+			if (video_data == nullptr)
+				continue;
+
+			video_data->codecType = video.get()->archive_header.codecType;
+			video_data->frameType = video.get()->archive_header.frameType;
+			video_data->resolution.height = video.get()->archive_header.height;
+			video_data->resolution.width = video.get()->archive_header.width;
+			video_data->pts = video.get()->timestamp_msec;
+
+			auto pnx_data = std::make_shared<PnxMediaData>();
+			pnx_data->type = Pnx::Media::MediaType::Video;
+			pnx_data->profile = read_object->GetProfile();
+			pnx_data->phoenix_play_info.cseq = cseq;
+			pnx_data->data = video_data;
+			pnx_data->time_info.FromMilliSeconds(video_data->pts);
+			media_datas->PushBack(pnx_data);
+		}
+		else if (auto audio = std::dynamic_pointer_cast<AudioData>(data)) {
+			auto audio_data = std::dynamic_pointer_cast<Pnx::Media::AudioSourceFrame>(audio.get()->buffer);
+			if (audio_data == nullptr)
+				continue;
+
+			audio_data->codecType = audio.get()->archive_header.codecType;
+			audio_data->audioChannels = audio.get()->archive_header.audioChannels;
+			audio_data->audioSampleRate = audio.get()->archive_header.audioSampleRate;
+			audio_data->audioBitPerSample = audio.get()->archive_header.audioBitPerSample;
+			audio_data->audioBitrate = audio.get()->archive_header.audioBitrate;
+			audio_data->pts = audio.get()->timestamp_msec;
+
+			auto pnx_data = std::make_shared<PnxMediaData>();
+			pnx_data->type = Pnx::Media::MediaType::Audio;
+			pnx_data->profile = read_object->GetProfile();
+			pnx_data->phoenix_play_info.cseq = cseq;
+			pnx_data->data = audio_data;
+			pnx_data->time_info.FromMilliSeconds(audio_data->pts);
+			media_datas->PushBack(pnx_data);
+		}
+		else if (auto meta = std::dynamic_pointer_cast<MetaData>(data)) {
+			auto meta_data = std::dynamic_pointer_cast<Pnx::Media::MetaDataSourceFrame>(meta.get()->buffer);
+			if (meta_data == nullptr)
+				continue;
+
+			meta_data->pts = meta.get()->timestamp_msec;
+
+			auto pnx_data = std::make_shared<PnxMediaData>();
+			pnx_data->type = Pnx::Media::MediaType::MetaData;
+			pnx_data->profile = read_object->GetProfile();
+			pnx_data->phoenix_play_info.cseq = cseq;
+			pnx_data->data = meta_data;
+			pnx_data->time_info.FromMilliSeconds(meta_data->pts);
+			media_datas->PushBack(pnx_data);
+		}
+	}
+
+	return media_datas;
+}
+

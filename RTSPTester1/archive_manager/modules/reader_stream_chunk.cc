@@ -257,12 +257,11 @@ bool ReaderStreamChunk::IsInGOP(const PnxMediaTime& time) {
   if (datas_.size() <= 0) {
     return false;
   }
-  auto first_video_frame = std::dynamic_pointer_cast<VideoData>(datas_[0]);
-  if(first_video_frame == nullptr) {
-	return false;
+  int frame_duration_msec = (int)GetFrameDuration();
+  if (frame_duration_msec <= 0) {
+    return false;
   }
-  float gap_between_frames = 1 / first_video_frame->archive_header.fps;
-  int frame_duration_msec = (int)(gap_between_frames * 1000);
+
   unsigned long long start_time_msec = 0;
   unsigned long long end_time_msec = 0;
   if (datas_[0]->archive_type != kArchiveTypeFrameVideo) {
@@ -283,9 +282,24 @@ bool ReaderStreamChunk::IsInGOP(const PnxMediaTime& time) {
     }
   }
   end_time_msec += frame_duration_msec;
-  if (time.ToMilliSeconds() >= start_time_msec && time.ToMilliSeconds() <= end_time_msec) {
+  start_time_msec -= frame_duration_msec;
+  uint64_t search_time = time.ToMilliSeconds();
+  if (search_time >= start_time_msec && search_time <= end_time_msec) {
     return true;
   }
   return false;
 }
 
+float ReaderStreamChunk::GetFrameDuration() {
+  float frame_duration = 0.0f;
+  if (datas_.size() <= 0) {
+    return frame_duration;
+  }
+  auto first_video_frame = std::dynamic_pointer_cast<VideoData>(datas_[0]);
+  if (first_video_frame == nullptr) {
+    return frame_duration;
+  }
+  frame_duration = 1 / first_video_frame->archive_header.fps;
+  frame_duration = (int)(frame_duration * 1000);
+  return frame_duration;
+}

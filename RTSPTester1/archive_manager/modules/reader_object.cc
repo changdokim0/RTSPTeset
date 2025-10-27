@@ -181,7 +181,8 @@ std::optional<std::vector<std::shared_ptr<StreamBuffer>>> ReaderObject::GetNextD
     while (true) {
       buffer = reader_stream_chunk.GetForwardData();
       if (buffer != nullptr) {
-        read_frame_position_msec_ = buffer->timestamp_msec;
+        if (buffer->archive_type == kArchiveTypeFrameVideo)
+          read_frame_position_msec_ = buffer->timestamp_msec;
         buffers.push_back(buffer);
       }
 
@@ -204,7 +205,8 @@ std::optional<std::vector<std::shared_ptr<StreamBuffer>>> ReaderObject::GetNextD
       while (true) {
         buffer = reader_stream_chunk.GetForwardData();
         if (buffer != nullptr) {
-          read_frame_position_msec_ = buffer->timestamp_msec;
+          if (buffer->archive_type == kArchiveTypeFrameVideo)
+            read_frame_position_msec_ = buffer->timestamp_msec;
           buffers.push_back(buffer);
         }
         auto current_data = reader_stream_chunk.GetCurrentData();
@@ -240,6 +242,10 @@ std::optional<Archive_FileInfo> ReaderObject::GetNextFile() {
   file_list_->pop_front();
   opened_file_timestamp_ = file_info.time_stamp_;
   return file_info;
+}
+
+unsigned long long ReaderObject::GetChunkEndTime() {
+  return read_frame_position_msec_ + (int)reader_stream_chunk.GetFrameDuration();
 }
 
 bool ReaderObject::IsInGOP(const PnxMediaTime& time) {

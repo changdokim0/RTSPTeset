@@ -41,7 +41,7 @@ protected:
 	CustomPictureControl m_videoWnd;
 	FFmpegWrapper ffmpegWrapper;
 	ReaderWorker reader_worker_;
-	std::shared_ptr<ReaderObject> read_object_;
+	//std::shared_ptr<ReaderObject> read_object_;
 	std::vector<std::optional<std::vector<std::shared_ptr<StreamBuffer>>>> buffers_all_;
 	CEdit m_FileSeekTimeEdit;
 	HTREEITEM tree_root_;
@@ -50,6 +50,17 @@ protected:
 
 	CString GetTypeString(int type);
 	void ConvertEpochToGMTAndLocalCString(long long epochTime, CString& gmtStr, CString& localStr);
+
+
+
+private:
+	//Seek
+	std::shared_ptr<ReaderObject> read_object_;
+	void InitSeeker();
+	bool Seeker(ChannelUUID channel, const PnxMediaTime& time, ArchiveReadType archive_read_type, std::shared_ptr<ReaderObject> read_object);
+	std::shared_ptr<ArchiveChunkBuffer> GetStreamGop(ArchiveChunkReadType gov_read_type, std::shared_ptr<ReaderObject> read_object);
+	std::shared_ptr<PnxMediaDataGroup> GetNextData(std::shared_ptr<ReaderObject> read_object, const unsigned char cseq, ArchiveType get_video_type);
+
 public:
 	virtual BOOL OnInitDialog();
 
@@ -69,4 +80,6 @@ public:
 	afx_msg void OnBnClickedButton1();
 	afx_msg void OnListItemChanged(NMHDR* pNMHDR, LRESULT* pResult);
 	CEdit m_edt_box;
+	afx_msg void OnBnClickedBtnFileloadNext();
+	afx_msg void OnBnClickedBtnFileloadGetgop();
 };

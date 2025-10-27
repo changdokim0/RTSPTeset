@@ -31,15 +31,16 @@
 
 #pragma once
 
-//#ifdef _WIN32
-//#ifdef ARCHIVE_MANAGER_EXPORTS
-//#define ARCHIVE_MANAGER_API __declspec(dllexport)
-//#else
-//#define ARCHIVE_MANAGER_API __declspec(dllimport)
-//#endif
-//#else
-//#define ARCHIVE_MANAGER_API
-//#endif
+#ifdef _WIN32
+#ifdef ARCHIVE_MANAGER_EXPORTS
+#define ARCHIVE_MANAGER_API __declspec(dllexport)
+#else
+#define ARCHIVE_MANAGER_API __declspec(dllimport)
+#endif
+#else
+#define ARCHIVE_MANAGER_API
+#endif
+
 #define ARCHIVE_MANAGER_API
 
 #define _CRT_SECURE_NO_WARNINGS
@@ -113,6 +114,7 @@ extern int g_dio_indexer_size_;
 // define param's
 ///////////////////////////////////////
 
+#define IOWORKER_MEMORY_BUFFER_QUEUE_MAX_COUNT 4
 #define IOWORKER_QUEUE_MAX_COUNT              10
 #define ARCHIVER_BUFFER_MEMORY_PERCENT        70
 #define ARCHIVER_SIMULATION_DELETE_TIME       7200  // 2 hour

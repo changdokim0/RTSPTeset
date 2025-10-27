@@ -65,7 +65,7 @@ bool ReaderWorker::ParseHeader(std::string file_name, std::shared_ptr<ReaderObje
 }
 
 std::shared_ptr<std::deque<Archive_FileInfo>> ReaderWorker::GetNearestFile(std::vector<std::filesystem::path> drives, ChannelUUID channel_uuid,
-                                                                           unsigned int time_stamp,
+                                                                           unsigned long long time_stamp,
                                                                             MediaProfile profile_type, ArchiveReadType archive_read_type,
                                                                             bool is_include_curfile) {
 
@@ -106,23 +106,23 @@ std::shared_ptr<std::deque<Archive_FileInfo>> ReaderWorker::GetNearestFile(std::
   // 1. Receive lists and use them only for up to 2 hours of the requested time. Delete data over 2 hours
   // 2. If there is no data within 2 hours, only the data for the next hour will be used.
   // The status of the data cannot be guaranteed when the above two conditions change.
-  time_t time = getNextHourLastSecond(time_stamp, 1, archive_read_type);
+  time_t time = getNextHourLastSecond(time_stamp /1000, 1, archive_read_type);
   int in2hour_size = 0;
   if (archive_read_type == kArchiveReadNext) {
-    in2hour_size = std::count_if(files->begin(), files->end(), [time](const Archive_FileInfo& obj) { return obj.time_stamp_ <= time; });
+    in2hour_size = std::count_if(files->begin(), files->end(), [time](const Archive_FileInfo& obj) { return obj.time_stamp_ /1000 <= time; });
     if (in2hour_size != 0) {
-      files->erase(std::remove_if(files->begin(), files->end(), [time](Archive_FileInfo x) { return x.time_stamp_ > time; }), files->end());
+      files->erase(std::remove_if(files->begin(), files->end(), [time](Archive_FileInfo x) { return x.time_stamp_ / 1000 > time; }), files->end());
     } else {
-      time = getNextHourLastSecond(files->begin()->time_stamp_, 0, archive_read_type);
-      files->erase(std::remove_if(files->begin(), files->end(), [time](Archive_FileInfo x) { return x.time_stamp_ > time; }), files->end());
+      time = getNextHourLastSecond(files->begin()->time_stamp_ / 1000, 0, archive_read_type);
+      files->erase(std::remove_if(files->begin(), files->end(), [time](Archive_FileInfo x) { return x.time_stamp_ / 1000 > time; }), files->end());
     }
   } else if (archive_read_type == kArchiveReadPrev) {
-    in2hour_size = std::count_if(files->begin(), files->end(), [time](const Archive_FileInfo& obj) { return obj.time_stamp_ >= time; });
+    in2hour_size = std::count_if(files->begin(), files->end(), [time](const Archive_FileInfo& obj) { return obj.time_stamp_ / 1000 >= time; });
     if (in2hour_size != 0) {
-      files->erase(std::remove_if(files->begin(), files->end(), [time](Archive_FileInfo x) { return x.time_stamp_ < time; }), files->end());
+      files->erase(std::remove_if(files->begin(), files->end(), [time](Archive_FileInfo x) { return x.time_stamp_ / 1000 < time; }), files->end());
     } else {
-      time = getNextHourLastSecond(files->begin()->time_stamp_, 0, archive_read_type);
-      files->erase(std::remove_if(files->begin(), files->end(), [time](Archive_FileInfo x) { return x.time_stamp_ < time; }), files->end());
+      time = getNextHourLastSecond(files->begin()->time_stamp_ / 1000, 0, archive_read_type);
+      files->erase(std::remove_if(files->begin(), files->end(), [time](Archive_FileInfo x) { return x.time_stamp_ / 1000 < time; }), files->end());
     }
   }
 
@@ -153,7 +153,7 @@ bool ReaderWorker::Seek(ChannelUUID channel_uuid, unsigned long long time_stamp_
   }
 
   std::shared_ptr<std::deque<Archive_FileInfo>> nearestfile2 =
-      GetNearestFile(drives, channel_uuid, time_stamp_msec / 1000, read_object.get()->GetProfile(), archive_read_type, true);
+      GetNearestFile(drives, channel_uuid, time_stamp_msec, read_object.get()->GetProfile(), archive_read_type, true);
   if (nearestfile2 == nullptr)
     return false;
 
@@ -233,7 +233,7 @@ std::shared_ptr<BaseBuffer> ReaderWorker::GetPrevData(ArchiveType get_video_type
   if (!ParseHeader(file_info->file_path_ + "/" + file_info->file_name_, read_object))
     return nullptr;
 
-  bool ret = read_object.get()->LoadDataByIndex((opened_file_time - 1) * 1000, kArchiveReadPrev);
+  bool ret = read_object.get()->LoadDataByIndex((opened_file_time - 1), kArchiveReadPrev);
   if (!ret)
     return nullptr;
 
@@ -274,7 +274,7 @@ std::optional<std::vector<std::shared_ptr<StreamBuffer>>> ReaderWorker::GetNextD
     }
 
     std::shared_ptr<std::deque<Archive_FileInfo>> nearestfile2 =
-        GetNearestFile(drives, read_object->GetSessionid(), play_time / 1000, read_object.get()->GetProfile(), kArchiveReadNext);
+        GetNearestFile(drives, read_object->GetSessionid(), play_time , read_object.get()->GetProfile(), kArchiveReadNext);
     if (nearestfile2 == nullptr || nearestfile2->size() <= 0)
       return std::nullopt;
 
@@ -287,7 +287,7 @@ std::optional<std::vector<std::shared_ptr<StreamBuffer>>> ReaderWorker::GetNextD
   if (!ParseHeader(file_info->file_path_ + "/" + file_info->file_name_, read_object))
     return std::nullopt;
 
-  bool ret = read_object.get()->LoadDataByIndex((unsigned long long)(file_info->time_stamp_) * 1000, kArchiveReadNext);
+  bool ret = read_object.get()->LoadDataByIndex((unsigned long long)(file_info->time_stamp_), kArchiveReadNext);
   if (!ret)
     return std::nullopt;
 

@@ -52,6 +52,7 @@ class ARCHIVE_MANAGER_API ReaderObject {
   uintmax_t FileSize() { return cur_file_size_; }
   std::ifstream& GetFileHandle() { return file_handle_; }
   unsigned long long GetCurrentPositionTime() { return read_frame_position_msec_; }
+  unsigned long long GetChunkEndTime();
   unsigned int GetOpenedFileTime() { return opened_file_timestamp_; }
   std::string GetSessionid() { return session_id_; }
 

@@ -61,7 +61,7 @@ class ARCHIVE_MANAGER_API ArchiveManager {
   bool SetDataEncryption(SessionID session_id, EncryptionType encrytion_type);
   bool Flush(SessionID session_id);
   void ChangeArchiveSystemUUID(std::optional<std::string> prev_system_uuid, std::string target_system_uuid, std::optional<std::string> prev_server_uuid,
-                               std::string target_server_uuid, std::function<void(bool)> callback);
+                               std::string target_server_uuid, std::string db_separator_name, std::function<void(bool)> callback);
 
   // ********** write API **********
   bool PushDataGroup(std::shared_ptr<PnxMediaArchiveDataGroup> data_group);

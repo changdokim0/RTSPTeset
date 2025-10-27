@@ -50,19 +50,18 @@ class ARCHIVE_MANAGER_API FileSearcher {
   FileSearcher();
   ~FileSearcher();
 
-  static std::string GetFolderFrTime(long long data_time);
+  static std::string GetFolderFrTime(unsigned long long data_time);
   static std::string GetDatFileName(std::filesystem::path save_path, std::string session_id, std::string filetime, MediaProfile profile,
                                     long long begin_timestamp_msec);
   static std::optional<std::vector<Archive_FileInfo>> GetNearestFileNames(fs::path drive, fs::path base_directory, std::string session_id,
-                                                                       unsigned int data_time,
-                                                       MediaProfile profile, ArchiveReadType archive_read_type, bool is_include_curfile = false);
+                                                                          unsigned long long data_time, MediaProfile profile, ArchiveReadType archive_read_type, bool is_include_curfile = false);
   static std::optional<std::vector<std::string>> GetFilesAndFolders(const std::string directory, bool is_directory);
   static std::optional<std::string> GetNearestFile(fs::path path, std::string file_name, MediaProfile profile, ArchiveReadType archive_read_type);
   static std::optional<std::string> GetNearestFolder(fs::path base_path, fs::path search_path, fs::path init_path, int path_level, int init_level,
                                                      ArchiveReadType archive_read_type);
 
   static unsigned int TimestampFromFile(std::string file_path);
-  static unsigned int ParseFileNameToTimestamp(std::string filename);
+  static unsigned long long ParseFileNameToTimestamp(std::string filename);
 
  private:
 };

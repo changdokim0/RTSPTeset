@@ -153,4 +153,5 @@ class IOWorker {
   int GetRandomFileNumber();
   bool ProcessChunkBuffers(std::shared_ptr<ArchiveChunkBuffer> gop_buffers);
   void ProcessFlush();
+  void CheckMemoryBufferSize(int max_buffer_count);
 };

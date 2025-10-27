@@ -32,7 +32,7 @@
 class Archive_FileInfo {
  public:
   Archive_FileInfo(){};
-  Archive_FileInfo(std::string file_name, std::string file_path, unsigned int time_stamp)
+  Archive_FileInfo(std::string file_name, std::string file_path, unsigned long long time_stamp)
       : file_name_(file_name), file_path_(file_path), time_stamp_(time_stamp){};
   Archive_FileInfo& operator=(const Archive_FileInfo& other) {
     this->file_name_ = other.file_name_;
@@ -42,5 +42,5 @@ class Archive_FileInfo {
   }
   std::string file_name_;
   std::string file_path_;
-  unsigned int time_stamp_ = 0;
+  unsigned long long time_stamp_ = 0;
 };

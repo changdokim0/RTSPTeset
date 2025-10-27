@@ -59,6 +59,7 @@ IOWorker::~IOWorker() {
   } catch (...) {
     fprintf(stdout, "[%s:%d][ArchiveL] Unknown exception caught in IOWorker destructor. \n", __func__, __LINE__);
   }
+  CheckMemoryBufferSize(0);
 }
 
 void IOWorker::SetPath(std::filesystem::path save_path) {
@@ -164,8 +165,12 @@ bool IOWorker::ProcessChunkBuffers(std::shared_ptr<ArchiveChunkBuffer> gop_buffe
 
     file_write_timestamp_ = static_cast<unsigned int>(time(nullptr) % UINT_MAX);
   }
-  std::unique_lock<std::mutex> lock(mmy_buf_mtx_);
-  memory_buffer_frames.push_back(buffers);
+  CheckMemoryBufferSize(IOWORKER_MEMORY_BUFFER_QUEUE_MAX_COUNT);
+  if (session_id_.purpose == PnxMediaArchiveInfo::EPurpose::kRecord) {
+    std::unique_lock<std::mutex> lock(mmy_buf_mtx_);
+    memory_buffer_frames.push_back(buffers);
+  }
+
   return true;
 }
 
@@ -243,20 +248,7 @@ bool IOWorker::WriteBufferToDisk(Pnx::Media::MediaSourceFramePtr buffer_data) {
     if (!WriteDisk(file_handle, write_file_data_handle_->writebuffer, write_file_data_handle_->dio_buffer_size_)) {
       return false;
     }
-    {
-      std::unique_lock<std::mutex> lock(mmy_buf_mtx_);
-      if (memory_buffer_frames.size() > 10) {
-
-        auto buffer = *memory_buffer_frames.begin();
-        for (auto data : memory_buffer_frames) {
-          if (auto gop_buffers = std::dynamic_pointer_cast<ArchiveChunkBuffer>(data)) {
-            gop_buffers->Clear();
-          }
-        }
-        memory_buffer_frames.clear();
-        memory_buffer_frames.push_back(buffer);
-      }
-    }
+    CheckMemoryBufferSize(1);
     int remain_size = buffer_data->dataSize() - remain__space;
     CheckBufferSize(remain_size);
 
@@ -278,7 +270,10 @@ bool IOWorker::WriteDisk(FileHandle handle, char* buffer, int write_size) {
   bitrate_monitor_.AddData(write_size);
   // success
   WriteDiskSuccess();
-  file_index_last_pos_ = write_file_indexer_handle.buffer_pos - sizeof(ArchiveIndexHeader);
+
+  if (write_file_indexer_handle.buffer_pos >= sizeof(ArchiveIndexHeader))
+    file_index_last_pos_ = write_file_indexer_handle.buffer_pos - sizeof(ArchiveIndexHeader);
+
   write_file_data_handle_->buffer_pos = 0;
   return true;
 }
@@ -413,7 +408,7 @@ void IOWorker::CheckBufferSize(int remain_size) {
 }
 
 bool IOWorker::UpdateFileNameByCondition(FileHandle file_handle, unsigned long long timestamp) {
-  std::string filetime = FileSearcher::GetFolderFrTime(timestamp / 1000);
+  std::string filetime = FileSearcher::GetFolderFrTime(timestamp);
   if (file_random_number_ == 0) {
     file_random_number_ = GetRandomFileNumber();
   }
@@ -535,17 +530,13 @@ void IOWorker::QueueCheck() {
   std::shared_ptr<std::vector<FrameWriteIndexData>> frameinfos = std::make_shared<std::vector<FrameWriteIndexData>>();
   std::shared_ptr<BaseBuffer> base_data = nullptr;
 
-  media_buffer_mtx_.lock_shared();
-  int buff_size = media_buffers.size();
-  media_buffer_mtx_.unlock_shared();
+  std::unique_lock<std::shared_mutex> lock(media_buffer_mtx_);
+  while (media_buffers.size() > buffer_size_) {
+    if (media_buffers.empty())
+      break;
 
-  while (buff_size > buffer_size_) {
-    {
-      std::unique_lock<std::shared_mutex> lock(media_buffer_mtx_);
-      base_data = media_buffers.front();
-      media_buffers.pop();
-      buff_size = media_buffers.size();
-    }
+    base_data = media_buffers.front();
+    media_buffers.pop();
 
     if (auto gop_buffers = std::dynamic_pointer_cast<ArchiveChunkBuffer>(base_data)) {
       while (true) {
@@ -558,6 +549,7 @@ void IOWorker::QueueCheck() {
       }
     }
   }
+  lock.unlock();
 
   if (frameinfos->size() > 0) {
     SPDLOG_ERROR("[ArchiveL] Buffer Over flow !!!!! session_id[{}], profile[{}]", channel_uuid_, profile_.ToString().c_str());
@@ -638,10 +630,19 @@ bool IOWorker::DoEncryption(std::shared_ptr<ArchiveChunkBuffer> media_datas) {
 void IOWorker::Flush() {
   SPDLOG_INFO("{} +++", __func__);
   SPDLOG_INFO("[ArchiveL--] PushVideoChunkBuffer stream_id_[{}] ProcessFlush() 0 ", stream_id_.c_str());
+  std::unique_lock<std::shared_mutex> lock(media_buffer_mtx_);
+  if (!media_buffers.empty()) {
+    auto last_data = media_buffers.back();
+    if (auto last_stream = std::dynamic_pointer_cast<StreamBuffer>(last_data)) {
+      if (last_stream->archive_type == kArchiveTypeFlush) {
+        SPDLOG_INFO("{} --- (skip flush, already last is flush)", __func__);
+        return;
+      }
+    }
+  }
+
   std::shared_ptr<StreamBuffer> flush_datas = std::make_shared<StreamBuffer>();
   flush_datas->archive_type = kArchiveTypeFlush;
-
-  std::unique_lock<std::shared_mutex> lock(media_buffer_mtx_);
   media_buffers.push(flush_datas);
   SPDLOG_INFO("{} ---", __func__);
 }
@@ -649,6 +650,7 @@ void IOWorker::Flush() {
 void IOWorker::ProcessFlush() {
   SPDLOG_INFO("{} +++", __func__);
   {
+    CheckMemoryBufferSize(1);
     std::unique_lock<std::shared_mutex> lock(media_buffer_mtx_);
     SPDLOG_INFO("[ArchiveL--] PushVideoChunkBuffer stream_id_[{}] ProcessFlush() 2, buffersize[{}]", stream_id_.c_str(), media_buffers.size()); 
   }
@@ -681,4 +683,18 @@ std::shared_ptr<ArchiveChunkBuffer> IOWorker::GetMemoryFrames(int64_t timestamp)
     }
   }
   return nullptr;
+}
+
+void IOWorker::CheckMemoryBufferSize(int max_buffer_count) {
+  std::unique_lock<std::mutex> lock(mmy_buf_mtx_);
+  if (memory_buffer_frames.size() > max_buffer_count) {
+    auto erase_begin = memory_buffer_frames.begin();
+    auto erase_end = memory_buffer_frames.end() - max_buffer_count;
+    for (auto it = erase_begin; it != erase_end; ++it) {
+      if (auto gop_buffers = std::dynamic_pointer_cast<ArchiveChunkBuffer>(*it)) {
+        gop_buffers->Clear();
+      }
+    }
+    memory_buffer_frames.erase(erase_begin, erase_end);
+  }
 }

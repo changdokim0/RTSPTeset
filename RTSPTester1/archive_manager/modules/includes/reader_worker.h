@@ -50,8 +50,8 @@ class ReaderWorker
   void DelDrive(std::filesystem::path drive);
   void SetData(std::filesystem::path save_path);
 
-  std::shared_ptr<std::deque<Archive_FileInfo>> GetNearestFile(std::vector<std::filesystem::path> drives, ChannelUUID channel_uuid, unsigned int time_stamp,
-                                                                MediaProfile profile_type, ArchiveReadType archive_read_type, bool is_include_curfile = false);
+  std::shared_ptr<std::deque<Archive_FileInfo>> GetNearestFile(std::vector<std::filesystem::path> drives, ChannelUUID channel_uuid,
+                                                               unsigned long long time_stamp, MediaProfile profile_type, ArchiveReadType archive_read_type, bool is_include_curfile = false);
 
   bool Seek(ChannelUUID channel_uuid, unsigned long long time_stamp_msec, ArchiveReadType archive_read_type, std::shared_ptr<ReaderObject> read_object);
   std::shared_ptr<ArchiveChunkBuffer> GetStreamChunk(ArchiveChunkReadType gov_read_type, std::shared_ptr<ReaderObject> read_object);

@@ -51,6 +51,7 @@ class ReaderStreamChunk {
   std::shared_ptr<ArchiveChunkBuffer> GetStreamChunk(unsigned long long& timestamp_msec, ArchiveChunkReadType GovReadType);
   bool SeekToTime(unsigned long long& t_msec, ArchiveReadType archive_read_type);
   bool IsInGOP(const PnxMediaTime& time);
+  float GetFrameDuration();
 
  private:
   StreamCryptor stream_crytor_;
