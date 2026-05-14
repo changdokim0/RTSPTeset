@@ -5,6 +5,7 @@
 #include "RTSPTester1.h"
 #include "afxdialogex.h"
 #include "CFileLoaderTab.h"
+#include "blaze_logger.h"
 #include <archive_define.h>
 
 // CFileLoaderTab 대화 상자
@@ -536,14 +537,14 @@ bool CFileLoaderTab::Seeker(ChannelUUID channel, const PnxMediaTime& time, Archi
 		read_object->GetProfile().ToString());*/
 	if (kArchiveReadNext == archive_read_type) {
 		reader_worker_.Seek(channel, time.ToMilliSeconds(), kArchiveReadPrev, read_object);
-		SPDLOG_INFO("[ArchiveL] Seek Next 1");
+		BLAZE_LOG_INFO("[ArchiveL] Seek Next 1");
 		if (read_object->IsInGOP(time)) {
 			read_object->ClearFileList();
 			while (true) {
 				if (read_object->GetChunkEndTime() < time.ToMilliSeconds()) {
 					auto frame_data = reader_worker_.GetNextData(kArchiveTypeFrameVideo, read_object);
 					if (frame_data == std::nullopt) {
-						SPDLOG_ERROR("[ArchiveL] Seek Next frame null");
+						BLAZE_LOG_ERROR("[ArchiveL] Seek Next frame null");
 						is_seek = false;
 						break;
 					}
@@ -552,18 +553,18 @@ bool CFileLoaderTab::Seeker(ChannelUUID channel, const PnxMediaTime& time, Archi
 					break;
 			}
 
-			SPDLOG_INFO("[ArchiveL] Seek Next in Gop");
+			BLAZE_LOG_INFO("[ArchiveL] Seek Next in Gop");
 			return is_seek;
 		}
 	}
-	SPDLOG_INFO("[ArchiveL] Seek - ");
+	BLAZE_LOG_INFO("[ArchiveL] Seek - ");
 	return reader_worker_.Seek(channel, time.ToMilliSeconds(), archive_read_type, read_object);
 }
 
 std::shared_ptr<ArchiveChunkBuffer> CFileLoaderTab::GetStreamGop(ArchiveChunkReadType gov_read_type, std::shared_ptr<ReaderObject> read_object) {
 	auto chunk_buffer = reader_worker_.GetStreamGop(gov_read_type, read_object);
 	if (chunk_buffer && read_object) {
-		SPDLOG_INFO("[ArchiveManager] GetStreamGop ch_uuid: {}, ArchiveChunkReadType: {}, pos(ms): {}, chunk_begin(ms): {}, chunk_end(ms): {}",
+		BLAZE_LOG_INFO("[ArchiveManager] GetStreamGop ch_uuid: {}, ArchiveChunkReadType: {}, pos(ms): {}, chunk_begin(ms): {}, chunk_end(ms): {}",
 			read_object->GetSessionid(), static_cast<int>(gov_read_type), read_object->GetCurrentPositionTime(), chunk_buffer->GetChunkBeginTime(),
 			chunk_buffer->GetChunkEndTime());
 	}
