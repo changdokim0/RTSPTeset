@@ -57,7 +57,6 @@
 #include "stream_cryptor.h"
 #include "bitrate_monitor.h"
 
-#include <spdlog/spdlog.h>
 
 class IOWorker {
  public:
@@ -67,8 +66,17 @@ class IOWorker {
   void SetPath(std::filesystem::path save_path);
   void SetStreamID(std::string stream_id) { stream_id_ = stream_id; }
   std::string GetStreamID() { return stream_id_; }
+  SessionID GetSessionID() { return session_id_; }
   std::string GetChannelUUID() { return channel_uuid_; }
   void SetDataEncryption(EncryptionType encrytion_type) { encrytion_type_ = encrytion_type; }
+  void SetChannelMetadata(std::optional<int> channel_index, std::optional<std::string> mac_address, std::optional<std::string> ip_address) {
+    channel_index_ = channel_index;
+    mac_address_ = mac_address;
+    ip_address_ = ip_address;
+  }
+  std::optional<int> GetChannelIndex() const { return channel_index_; }
+  std::optional<std::string> GetMacAddress() const { return mac_address_; }
+  std::optional<std::string> GetIpAddress() const { return ip_address_; }
 
   bool PushVideoChunkBuffer(std::filesystem::path save_driver, std::shared_ptr<ArchiveChunkBuffer> media_datas);
   bool ProcessBuffer(unsigned int timestamp);
@@ -78,7 +86,8 @@ class IOWorker {
   std::optional<std::pair<ArchiveIndexHeader, ArchiveObject>> GetFrame(int time_stamp);
   std::optional<std::pair<ArchiveIndexHeader, ArchiveObject>> GetPrevFrame();
   std::optional<std::pair<ArchiveIndexHeader, ArchiveObject>> GetNextFrame();
-  void Flush();
+  void Flush(FlushType flush_type);
+  bool IsFileOpen() const;
 
   std::function<void(SessionID session_id, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>>)>
       callback_write_status_iwtaw_;
@@ -93,12 +102,16 @@ class IOWorker {
   ChannelUUID channel_uuid_;
   std::string stream_id_ = "";
   MediaProfile profile_;
+  std::optional<int> channel_index_;
+  std::optional<std::string> mac_address_;
+  std::optional<std::string> ip_address_;
   std::filesystem::path save_driver_;
   bool change_file_ = false;
   std::shared_ptr<DataFileHandle> write_file_data_handle_;
   FileWriteIndexer write_file_indexer_handle;
   EncryptionType encrytion_type_ = kEncryptionNone;
   StreamCryptor stream_crytor_;
+  int cnt_buffer_over_ = 0;
 
   int dio_buffer_nomal_size = g_dio_buffer_size_;
   int dio_buffer_busy_size = g_dio_buffer_size_;
@@ -108,7 +121,7 @@ class IOWorker {
   std::filesystem::path save_path_;
   std::queue<std::shared_ptr<BaseBuffer>> media_buffers;
 
-  FileHandle file_handle = InvalidHandle;
+  FileHandle file_handle_ = InvalidHandle;
   std::string write_file_name_;
 
   // The time stamp below is intended to be used when changing the file. If it is not needed, it will be deleted.
@@ -133,15 +146,17 @@ class IOWorker {
   bool WriteRemain(FileHandle hFile, int remain_size);
   void FireBuffer();
   bool WriteDisk(FileHandle file_handle, char* buffer, int write_size);
+  bool WriteFlushMemory(FileHandle handle);
   bool FileClose();
   bool UpdateFileNameByCondition(FileHandle file_handle, unsigned long long timestamp);
   bool WriteFileChange(std::string filetime, unsigned long long timestamp);
   bool WriteBufferToDisk(Pnx::Media::MediaSourceFramePtr buffer_data);
   bool WriteIndexInfo(ArchiveType archive_type, int packet_size, unsigned long long begin_timestramp_msec, unsigned long long end_timestramp_msec,
                       EncryptionType encryption_type);
-  bool WriteBlockInfo(std::shared_ptr<BaseBuffer> stream_buffer);
+  bool WriteBlockInfo(std::shared_ptr<BaseBuffer> base_buffer);
   void WriteDiskSuccess();
   void WriteDiskFail();
+  bool HandleTimestampRollback(unsigned long long timestamp);
   void CheckBufferSize(int remain_size);
   bool CloseSavedFile();
   bool DoEncryption(std::shared_ptr<ArchiveChunkBuffer> media_datas);
@@ -149,9 +164,10 @@ class IOWorker {
   bool DeleteEmptyFolders(const std::string& folderPath);
   bool Delete_File(const std::string& filePath);
   void QueueCheck();
-  void MemoryCheck();
+  void AdjustWriteBlockSize();
   int GetRandomFileNumber();
   bool ProcessChunkBuffers(std::shared_ptr<ArchiveChunkBuffer> gop_buffers);
-  void ProcessFlush();
+  void ProcessFlush(ArchiveType archive_type);
   void CheckMemoryBufferSize(int max_buffer_count);
+  void CreateDeviceInfoFile();
 };

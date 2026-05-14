@@ -28,7 +28,7 @@
  */
 
 #include "archive_chunk_buffer.h"
-#include <spdlog/spdlog.h>
+#include "blaze_logger.h"
 
 ArchiveChunkBuffer::ArchiveChunkBuffer() {
   buffer_headers_size_ = 1024 * 100;
@@ -105,26 +105,29 @@ std::shared_ptr<char> ArchiveChunkBuffer::GetHeadersMemory() {
   memcpy(buffer_headers_.get() + pos, &item_count, sizeof(int));
   pos += sizeof(int);
   for (auto buffer : chunk_block_buffers_) {
-    if (auto video = std::dynamic_pointer_cast<VideoData>(buffer)) {
+    if (buffer->archive_type == kArchiveTypeFrameVideo) {
       headersize = sizeof(VideoHeader);
+      auto* video = static_cast<VideoData*>(buffer.get());
       memcpy(buffer_headers_.get() + pos, &(buffer->archive_type), sizeof(int));
       pos += sizeof(int);
-      memcpy(buffer_headers_.get() + pos, &(video.get()->archive_header), headersize);
+      memcpy(buffer_headers_.get() + pos, &(video->archive_header), headersize);
       pos += headersize;
-    } else if (auto audio = std::dynamic_pointer_cast<AudioData>(buffer)) {
+    } else if (buffer->archive_type == kArchiveTypeAudio) {
       headersize = sizeof(AudioHeader);
+      auto* audio = static_cast<AudioData*>(buffer.get());
       memcpy(buffer_headers_.get() + pos, &(buffer->archive_type), sizeof(int));
       pos += sizeof(int);
-      memcpy(buffer_headers_.get() + pos, &(audio.get()->archive_header), headersize);
+      memcpy(buffer_headers_.get() + pos, &(audio->archive_header), headersize);
       pos += headersize;
-    } else if (auto meta = std::dynamic_pointer_cast<MetaData>(buffer)) {
+    } else if (buffer->archive_type == kArchiveTypeMeta) {
       headersize = sizeof(MetaHeader);
+      auto* meta = static_cast<MetaData*>(buffer.get());
       memcpy(buffer_headers_.get() + pos, &(buffer->archive_type), sizeof(int));
       pos += sizeof(int);
-      memcpy(buffer_headers_.get() + pos, &(meta.get()->archive_header), headersize);
+      memcpy(buffer_headers_.get() + pos, &(meta->archive_header), headersize);
       pos += headersize;
     } else {
-      SPDLOG_ERROR("Unknown Type Error[{}]", (int)buffer->archive_type);
+      BLAZE_LOG_ERROR("Unknown Type Error[{}]", (int)buffer->archive_type);
     }
   }
   return buffer_headers_;
@@ -183,17 +186,20 @@ void ArchiveChunkBuffer::TrimToLastGOP() {
   if(chunk_block_buffers_.size() <= 1)
 	return;
 
-  std::list<std::shared_ptr<StreamBuffer>>::iterator last_iframe;
+  std::deque<std::shared_ptr<StreamBuffer>>::iterator last_iframe = chunk_block_buffers_.end();
   auto it = chunk_block_buffers_.begin();
   for (; it != chunk_block_buffers_.end(); it++) {
     auto buffer = *it;
     if (buffer->archive_type == kArchiveTypeFrameVideo) {
-      auto video = std::dynamic_pointer_cast<VideoData>(buffer);
-      if (video != nullptr && video->archive_header.frameType == Pnx::Media::VideoFrameType::I_FRAME) {
+      auto* video = static_cast<VideoData*>(buffer.get());
+      if (video->archive_header.frameType == Pnx::Media::VideoFrameType::I_FRAME) {
         last_iframe = it;
       }
     }
   }
+
+  if (last_iframe == chunk_block_buffers_.end())
+    return;
 
   chunk_block_buffers_.erase(chunk_block_buffers_.begin(), last_iframe);
 

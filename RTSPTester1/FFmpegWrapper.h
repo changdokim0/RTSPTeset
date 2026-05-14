@@ -47,7 +47,7 @@ public:
     bool ReceiveFrame(uint8_t* data, int size, YUVData& yuvData);
     void Cleanup();
 	CODEC_TYPE GetCodecType() { return codecType; }
-    bool GetFrame(YUVData& yuvData);
+    bool GetFrame(YUVData& yuvData, int& linesize);
 
 private:
     AVCodecContext* codecContext;

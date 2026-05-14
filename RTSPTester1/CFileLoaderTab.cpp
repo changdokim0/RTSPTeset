@@ -164,8 +164,9 @@ void CFileLoaderTab::HandleListItemSelection()
 					break;
 			}
 		}
-		ffmpegWrapper.GetFrame(yuvData);
-		m_videoWnd.LoadVideoFrame(yuvData.yData.get(), yuvData.uData.get(), yuvData.vData.get(), yuvData.width, yuvData.height);
+		int linesize = 0;
+		ffmpegWrapper.GetFrame(yuvData, linesize);
+		m_videoWnd.LoadVideoFrame(yuvData.yData.get(), yuvData.uData.get(), yuvData.vData.get(), linesize, yuvData.height);
 	}
 }
 

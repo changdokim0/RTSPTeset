@@ -31,7 +31,7 @@
 #include "platform_file.h"
 #include <filesystem>
 #include <string.h>
-
+#include "blaze_logger.h"
 #ifdef _WIN32
 #include <Windows.h>
 #else
@@ -49,8 +49,10 @@ FileHandle PlatformFile::FileDirectOpen(std::string file_name) {
     std::string path = p.parent_path().string();
     if (!std::filesystem::exists(path)) {
       if (!std::filesystem::create_directories(path)) {
-        SPDLOG_ERROR("Failed to create directory[{}], error code[{}]", path.c_str(), strerror(errno));
-        return InvalidHandle;
+        if (!std::filesystem::exists(path)) {
+          BLAZE_LOG_ERROR("Failed to create directory[{}], error code[{}]", path.c_str(), strerror(errno));
+          return InvalidHandle;
+        }
       }
     }
     file_name_ = file_name;
@@ -63,7 +65,7 @@ FileHandle PlatformFile::FileDirectOpen(std::string file_name) {
                               FILE_FLAG_NO_BUFFERING, NULL);
 
     if (hFile == INVALID_HANDLE_VALUE) {
-      SPDLOG_ERROR("ailed to open file[{}], error code[{}]", file_name.c_str(), GetLastError());
+      BLAZE_LOG_ERROR("Failed to open file[{}], error code[{}]", file_name.c_str(), GetLastError());
 
       return InvalidHandle;
     }
@@ -71,7 +73,7 @@ FileHandle PlatformFile::FileDirectOpen(std::string file_name) {
 #else
     int fd = open(file_name.c_str(), O_RDWR | O_CREAT | O_DIRECT, 0644);
     if (fd == -1) {
-      SPDLOG_ERROR("ailed to open file[{}], error code[{}]", file_name.c_str(), strerror(errno));
+      BLAZE_LOG_ERROR("Failed to open file[{}], error code[{}]", file_name.c_str(), strerror(errno));
       return InvalidHandle;
     }
     return fd;
@@ -80,7 +82,7 @@ FileHandle PlatformFile::FileDirectOpen(std::string file_name) {
     //std::cout << "File[" << __FILE__ << "], Function[" << __FUNCTION__ << "], Line [" << __LINE__ << "], Message [" << file_name_ << "]: "
     //          << "Error code: " << e.what() << std::endl;
 
-    SPDLOG_ERROR("ailed to open file[{}], error[{}]", file_name_.c_str(), e.what());
+    BLAZE_LOG_ERROR("Failed to open file[{}], error[{}]", file_name_.c_str(), e.what());
     return InvalidHandle;
   }
 }
@@ -94,7 +96,7 @@ bool PlatformFile::CloseFile(FileHandle& hFile) {
 #else
     if (close(hFile) == -1) {
       ret = false;
-      printf("Error closing file: %s\n", strerror(errno));
+      BLAZE_LOG_ERROR("Error closing file[{}]: {}", file_name_.c_str(), strerror(errno));
     } else
       ret = true;
 #endif
@@ -103,7 +105,7 @@ bool PlatformFile::CloseFile(FileHandle& hFile) {
   catch (const std::exception& e) {
     /*std::cout << "File[" << __FILE__ << "], Function[" << __FUNCTION__ << "], Line [" << __LINE__ << "], Message [" << file_name_ << "]: "
             << "Error code: " << e.what() << std::endl;*/
-    SPDLOG_ERROR("Fail CloseFile[{}], error msg[{}]", file_name_.c_str(), e.what());
+    BLAZE_LOG_ERROR("Fail CloseFile[{}], error msg[{}]", file_name_.c_str(), e.what());
     return false;
   }
   return ret;
@@ -111,50 +113,74 @@ bool PlatformFile::CloseFile(FileHandle& hFile) {
 
 bool PlatformFile::FileWrite(FileHandle& hFile, char* buffer, int write_size) {
   std::lock_guard<std::mutex> lock(file_mtx_);
+  if (write_size <= 0) {
+    BLAZE_LOG_ERROR("Invalid write_size [{}] for file[{}]", write_size, file_name_.c_str());
+    return false;
+  }
 
   const int max_attempts = 3;
-  int attempt = 0;
-  bool success = false;
+  int error_count = 0;
+  int total_written = 0;
 
 #ifdef _WIN32
-  DWORD bytesWritten = 0;
-  while (attempt < max_attempts) {
-    if (WriteFile(hFile, buffer, write_size, &bytesWritten, NULL)) {
-      success = true;
+  while (total_written < write_size && error_count < max_attempts) {
+    DWORD bytesWritten = 0;
+    int remaining = write_size - total_written;
+    if (remaining <= 0 || remaining > write_size) {
+      BLAZE_LOG_ERROR("Overflow/underflow detected: remaining [{}], write_size [{}], total_written [{}]", remaining, write_size, total_written);
       break;
     }
-    ++attempt;
-    int last_error = GetLastError();
-    SPDLOG_ERROR("Failed to write to file [{}], attempt [{}], error msg[{}]", file_name_.c_str(), attempt, last_error);
+
+    if (WriteFile(hFile, buffer + total_written, remaining, &bytesWritten, NULL)) {
+      if (bytesWritten > 0) {
+        total_written += bytesWritten;
+      } else {
+        // WriteFile succeeded but wrote 0 bytes - treat as error
+        ++error_count;
+        BLAZE_LOG_WARN("WriteFile returned 0 bytes for file[{}], error count[{}/{}], written[{}/{}]",
+                    file_name_.c_str(), error_count, max_attempts, total_written, write_size);
+      }
+    } else {
+      ++error_count;
+      BLAZE_LOG_ERROR("WriteFile failed for file[{}], error code[{}], error count[{}/{}], written[{}/{}]",
+                   file_name_.c_str(), GetLastError(), error_count, max_attempts, total_written, write_size);
+    }
   }
-  if (!success) {
-    hFile = InvalidHandle;
+  
+  if (total_written < write_size) {
+    BLAZE_LOG_ERROR("Failed to write complete data to file[{}], written[{}/{}] bytes, errors[{}]",
+                 file_name_.c_str(), total_written, write_size, error_count);
     return false;
   }
 #else
-  ssize_t written = -1;
-  while (attempt < max_attempts) {
-    written = ::write(hFile, buffer, write_size);
-    if (written != -1) {
-      success = true;
+  while (total_written < write_size && error_count < max_attempts) {
+    int remaining = write_size - total_written;
+    if (remaining <= 0 || remaining > write_size) {
+      BLAZE_LOG_ERROR("Overflow/underflow detected: remaining [{}], write_size [{}], total_written [{}]", remaining, write_size, total_written);
       break;
     }
-    ++attempt;
-    SPDLOG_ERROR("Failed to write to file [{}], attempt [{}], error msg[{}]", file_name_.c_str(), attempt, strerror(errno));
-  }
-  if (!success) {
-    try {
-      if (!close(hFile)) {
-        throw std::runtime_error("Failed to close file handle.");
-      }
-    } catch (const std::exception& e) {
-      std::cerr << "Error: " << e.what() << std::endl;
-      return false;
+
+    ssize_t written = ::write(hFile, buffer + total_written, remaining);
+    
+    if (written > 0) {
+      total_written += written;
+    } else if (written == 0) {
+      ++error_count;
+      BLAZE_LOG_WARN("write() returned 0 bytes for file[{}], error count[{}/{}], written[{}/{}]",
+                  file_name_.c_str(), error_count, max_attempts, total_written, write_size);
+    } else {
+      ++error_count;
+      BLAZE_LOG_ERROR("write() failed for file[{}], error[{}], error count[{}/{}], written[{}/{}]",
+                   file_name_.c_str(), strerror(errno), error_count, max_attempts, total_written, write_size);
     }
+  }
+  
+  if (total_written < write_size) {
+    BLAZE_LOG_ERROR("Failed to write complete data to file[{}], written[{}/{}] bytes, errors[{}]",
+                 file_name_.c_str(), total_written, write_size, error_count);
     return false;
   }
 #endif
-
   return true;
 }
 
@@ -165,18 +191,18 @@ long long PlatformFile::GetDatFilePosition(FileHandle& file_handle) {
 #ifdef _WIN32
     newPosition = SetFilePointer(file_handle, 0, NULL, FILE_CURRENT);
     if (newPosition == INVALID_SET_FILE_POINTER && GetLastError() != NO_ERROR) {
-      SPDLOG_ERROR("Fail GetDatFilePosition file[{}], error code[{}]", file_name_.c_str(), GetLastError());
+      BLAZE_LOG_ERROR("Fail GetDatFilePosition file[{}], error code[{}]", file_name_.c_str(), GetLastError());
       return -1;
     }
 #else
     newPosition = lseek(file_handle, 0, SEEK_CUR);
     if (newPosition == (off_t)-1) {
-      SPDLOG_ERROR("Fail GetDatFilePosition file[{}], error code[{}]", file_name_.c_str(), strerror(errno));
+      BLAZE_LOG_ERROR("Fail GetDatFilePosition file[{}], error code[{}]", file_name_.c_str(), strerror(errno));
       return -1;
     } 
 #endif
   } catch (const std::exception& e) {
-    SPDLOG_ERROR("Fail GetDatFilePosition file[{}], error msg[{}]", file_name_.c_str(), e.what());
+    BLAZE_LOG_ERROR("Fail GetDatFilePosition file[{}], error msg[{}]", file_name_.c_str(), e.what());
     return -1;
   }
   return newPosition;
@@ -188,21 +214,21 @@ bool PlatformFile::SetDatFilePosition(FileHandle& file_handle, long long offset)
 #ifdef _WIN32
     long long newPosition = SetFilePointer(file_handle, offset, NULL, FILE_BEGIN);
     if (newPosition == INVALID_SET_FILE_POINTER && GetLastError() != NO_ERROR) {
-      SPDLOG_ERROR("Fail SetDatFilePosition file[{}], error msg[{}]", file_name_.c_str(), GetLastError());
+      BLAZE_LOG_ERROR("Fail SetDatFilePosition file[{}], error msg[{}]", file_name_.c_str(), GetLastError());
       return false;
     }else
       return true;
 #else
     off_t newPosition = lseek(file_handle, offset, SEEK_SET);
     if (newPosition == (off_t)-1) {
-      SPDLOG_ERROR("Fail SetDatFilePosition file[{}], error msg[{}]", file_name_.c_str(), strerror(errno));
+      BLAZE_LOG_ERROR("Fail SetDatFilePosition file[{}], error msg[{}]", file_name_.c_str(), strerror(errno));
       return false;
     }else
       return true;
 #endif
   } catch (const std::exception& e) {
 
-    SPDLOG_ERROR("Fail SetDatFilePosition file[{}], error msg[{}]", file_name_.c_str(), e.what());
+    BLAZE_LOG_ERROR("Fail SetDatFilePosition file[{}], error msg[{}]", file_name_.c_str(), e.what());
     return false;
   }
 }

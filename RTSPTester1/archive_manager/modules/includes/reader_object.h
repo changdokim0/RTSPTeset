@@ -34,7 +34,6 @@
 #include "reader_stream_chunk.h"
 #include "archive_chunk_buffer.h"
 #include "archive_fileinfo.h"
-#include <spdlog/spdlog.h>
 
 class ARCHIVE_MANAGER_API ReaderObject {
  public:

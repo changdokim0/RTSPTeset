@@ -28,6 +28,7 @@
  */ 
 
 #include "reader_stream_chunk.h"
+#include "blaze_logger.h"
 
 ReaderStreamChunk::ReaderStreamChunk() {
 
@@ -53,7 +54,7 @@ bool ReaderStreamChunk::LoadFrames(std::shared_ptr<char> data, int data_size, En
   mempos += sizeof(int);
 
   if (data_size < header_size || header_count < 0 || header_count > ARCHIVER_CHUNK_MAX_SIZE) {
-    SPDLOG_ERROR("FAIL LoadFrames Header header_size[{}], data_size[{}], header_count[{}]", header_size, data_size, header_count);
+    BLAZE_LOG_ERROR("FAIL LoadFrames Header header_size[{}], data_size[{}], header_count[{}]", header_size, data_size, header_count);
     return false;
   }
 
@@ -142,7 +143,7 @@ std::shared_ptr<ArchiveChunkBuffer> ReaderStreamChunk::GetStreamChunk(unsigned l
     timestamp_msec = data.get()->timestamp_msec;
     archive_gov_buffer->PushQueue(data);
 
-    if (GovReadType == kArchiveChunkReadTarget && data->timestamp_msec >= cut_timestamp) {
+    if (GovReadType == kArchiveChunkReadTarget && data->timestamp_msec >= cut_timestamp && data->archive_type == kArchiveTypeFrameVideo) {
       select_time = data->timestamp_msec;
       break;
     }
@@ -156,7 +157,7 @@ std::shared_ptr<ArchiveChunkBuffer> ReaderStreamChunk::GetStreamChunk(unsigned l
       data_index_++;    
   }
 
-  SPDLOG_INFO("GetStreamChunk index [{}], request time[{}],  request select_time[{}]", data_index_, cut_timestamp, select_time);
+  BLAZE_LOG_INFO("GetStreamChunk index [{}], request time[{}],  request select_time[{}]", data_index_, cut_timestamp, select_time);
   return archive_gov_buffer;
 }
 
@@ -185,7 +186,8 @@ std::shared_ptr<ArchiveChunkBuffer> ReaderStreamChunk::GetStreamGop(unsigned lon
     }
 
     archive_gov_buffer->PushQueue(data);
-    if (GovReadType == kArchiveChunkReadTarget && data->timestamp_msec >= cut_timestamp) {
+    if (GovReadType == kArchiveChunkReadTarget && data->timestamp_msec >= cut_timestamp &&  
+      data->archive_type == kArchiveTypeFrameVideo) {
       select_time = data->timestamp_msec;
       break;
     }
@@ -199,7 +201,7 @@ std::shared_ptr<ArchiveChunkBuffer> ReaderStreamChunk::GetStreamGop(unsigned lon
       data_index_++;    
   }
 
-  SPDLOG_INFO("GetStreamGop index [{}], request time[{}],  request select_time[{}]", data_index_, cut_timestamp, select_time);
+  BLAZE_LOG_INFO("GetStreamGop index [{}], request time[{}],  request select_time[{}]", data_index_, cut_timestamp, select_time);
   return archive_gov_buffer;
 }
 
@@ -225,11 +227,11 @@ bool ReaderStreamChunk::SeekToTime(unsigned long long& t_msec, ArchiveReadType a
     }
   }
   if (min_gap.first == ULLONG_MAX) {
-    SPDLOG_ERROR("+++++++ FAILED TO SEEK (target:[{}]/is_forward:[{}]) +++++++\n", t_msec, (int)archive_read_type);
+    BLAZE_LOG_ERROR("+++++++ FAILED TO SEEK (target:[{}]/is_forward:[{}]) +++++++\n", t_msec, (int)archive_read_type);
     for (int i = 0; i < datas_.size(); i++) {
-      SPDLOG_ERROR("....... LoadedData[{}] : timestamp_msec[{}]ArchiveType[{}]\n", i, datas_[i]->timestamp_msec, (int)datas_[i]->archive_type);
+      BLAZE_LOG_ERROR("....... LoadedData[{}] : timestamp_msec[{}]ArchiveType[{}]\n", i, datas_[i]->timestamp_msec, (int)datas_[i]->archive_type);
     }
-    SPDLOG_ERROR("------- FAILED TO SEEK (target:[{}]/is_forward:[{}]) -------\n", t_msec, (int)archive_read_type);
+    BLAZE_LOG_ERROR("------- FAILED TO SEEK (target:[{}]/is_forward:[{}]) -------\n", t_msec, (int)archive_read_type);
     return false;
   }
   data_index_ = min_gap.second;
@@ -265,13 +267,13 @@ bool ReaderStreamChunk::IsInGOP(const PnxMediaTime& time) {
   unsigned long long start_time_msec = 0;
   unsigned long long end_time_msec = 0;
   if (datas_[0]->archive_type != kArchiveTypeFrameVideo) {
-    SPDLOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
-    SPDLOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
-    SPDLOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
-    SPDLOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
-    SPDLOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
-    SPDLOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
-    SPDLOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
+    BLAZE_LOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
+    BLAZE_LOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
+    BLAZE_LOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
+    BLAZE_LOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
+    BLAZE_LOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
+    BLAZE_LOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
+    BLAZE_LOG_ERROR("The first data of the datas_[] is not a video frame!\nPlease report this issue to hyo-jin.kim@hanwha.com.\nVERY IMPORTATNT\n");
     return false;
   } else {
     start_time_msec = datas_[0]->timestamp_msec;
@@ -282,7 +284,6 @@ bool ReaderStreamChunk::IsInGOP(const PnxMediaTime& time) {
     }
   }
   end_time_msec += frame_duration_msec;
-  start_time_msec -= frame_duration_msec;
   uint64_t search_time = time.ToMilliSeconds();
   if (search_time >= start_time_msec && search_time <= end_time_msec) {
     return true;
@@ -291,7 +292,7 @@ bool ReaderStreamChunk::IsInGOP(const PnxMediaTime& time) {
 }
 
 float ReaderStreamChunk::GetFrameDuration() {
-  float frame_duration = 0.0f;
+  float frame_duration = 200.0f;
   if (datas_.size() <= 0) {
     return frame_duration;
   }
@@ -299,7 +300,10 @@ float ReaderStreamChunk::GetFrameDuration() {
   if (first_video_frame == nullptr) {
     return frame_duration;
   }
-  frame_duration = 1 / first_video_frame->archive_header.fps;
+  if (first_video_frame->archive_header.fps <= 0) {
+    return frame_duration;
+  }
+  frame_duration = 1.0f / first_video_frame->archive_header.fps;
   frame_duration = (int)(frame_duration * 1000);
   return frame_duration;
 }

@@ -84,7 +84,7 @@ bool FFmpegWrapper::ReceiveFrame(uint8_t* data, int size, YUVData& yuvData) {
 
     return true;
 }
-bool FFmpegWrapper::GetFrame(YUVData& yuvData) {
+bool FFmpegWrapper::GetFrame(YUVData& yuvData, int& linesize) {
     sw_frame = av_frame_alloc();
     if (!sw_frame) {
         std::cerr << "Cannot allocate software frame." << std::endl;
@@ -108,9 +108,9 @@ bool FFmpegWrapper::GetFrame(YUVData& yuvData) {
     yuvData.vData = std::make_unique<uint8_t[]>(yuvData.vSize);
     
     for (int i = 0; i < sw_frame->height; i++) {
-        memcpy(yuvData.yData.get() + i * sw_frame->linesize[0], sw_frame->data[0] + i * sw_frame->linesize[0], sw_frame->width);
+        memcpy(yuvData.yData.get() + i * sw_frame->linesize[0], sw_frame->data[0] + i * sw_frame->linesize[0], sw_frame->linesize[0]);
     }
-    
+    linesize = sw_frame->linesize[0];
     for (int i = 0; i < sw_frame->height / 2; i++) {
         for (int j = 0; j < sw_frame->width / 2; j++) {
             yuvData.uData[i * (sw_frame->width / 2) + j] = sw_frame->data[1][i * sw_frame->linesize[1] + j * 2];
@@ -119,6 +119,7 @@ bool FFmpegWrapper::GetFrame(YUVData& yuvData) {
     }
     av_frame_free(&sw_frame);
 }
+
 void FFmpegWrapper::Cleanup() {
     av_frame_free(&frame);
     av_packet_free(&packet);

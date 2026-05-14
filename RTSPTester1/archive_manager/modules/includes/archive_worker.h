@@ -51,7 +51,7 @@ class ArchiveWorker {
   std::map<std::string, std::shared_ptr<IOWorker>> GetIOWorkers() { std::shared_lock<std::shared_mutex> lock(mtx_ioworkers_); return io_workers_; };
   bool AddStream(SessionID session_id);
   bool DeleteStream(SessionID session_id);
-  bool Flush(SessionID session_id);
+  bool Flush(SessionID session_id, FlushType flush_type);
   bool RemoveIOWorker(std::string stream_id);
   void PushStream(std::string stream_id, std::shared_ptr<IOWorker> io_worker);
   bool SetDataEncryption(SessionID session_id, EncryptionType encrytion_type);
@@ -80,12 +80,13 @@ class ArchiveWorker {
   std::filesystem::path driver_ = "";
   std::filesystem::path save_path_ = "";
   void RunWorkThread();
-  std::map<std::string, std::shared_ptr<IOWorker>> io_workers_; 
+  std::map<std::string, std::shared_ptr<IOWorker>> io_workers_;
   std::shared_mutex mtx_ioworkers_, mtx_io_delete_;
 
   //thread
   bool run_thread_ = false;
-  std::thread* work_thread_ = nullptr;
+  std::vector<std::thread*> work_threads_;
+  std::mutex mtx_threads_;
   std::condition_variable cv_;
   std::mutex cv_mtx_;
   bool condition_release_ = false;

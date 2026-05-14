@@ -41,8 +41,6 @@
 #define ARCHIVE_MANAGER_API
 #endif
 
-#define ARCHIVE_MANAGER_API
-
 #define _CRT_SECURE_NO_WARNINGS
 
 #ifdef _WIN32
@@ -71,6 +69,7 @@ enum ArchiveType {
   kArchiveTypeAudio,
   kArchiveTypeMeta,
   kArchiveTypeFlush,
+  kArchiveTypeFlushFileClose,
 };
 
 enum ReadFrameType {
@@ -102,6 +101,11 @@ enum EncryptionType {
   kEncryptionAES256,
 };
 
+enum FlushType {
+  kFlushTypeNone = 0,
+  kFileClose,
+};
+
 ///////////////////////////////////////
 // external variable
 ///////////////////////////////////////
@@ -115,7 +119,11 @@ extern int g_dio_indexer_size_;
 ///////////////////////////////////////
 
 #define IOWORKER_MEMORY_BUFFER_QUEUE_MAX_COUNT 4
-#define IOWORKER_QUEUE_MAX_COUNT              10
+#define IOWORKER_QUEUE_MAX_COUNT            16
+
+#define IOWORKER_THREAD_MAX_COUNT             100
+#define IOWORKER_THREAD_MAX_COUNT_APPLIANCE   8
+
 #define ARCHIVER_BUFFER_MEMORY_PERCENT        70
 #define ARCHIVER_SIMULATION_DELETE_TIME       7200  // 2 hour
 #define ARCHIVER_VERSOIN                      0001

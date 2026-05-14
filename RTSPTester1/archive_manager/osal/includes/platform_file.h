@@ -31,7 +31,6 @@
 
 #pragma once
 #include <iostream>
-#include <spdlog/spdlog.h>
 
 #include "archive_define.h"
 

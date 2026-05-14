@@ -31,7 +31,7 @@
 
 #include <string>
 #include <queue>
-#include <list>
+#include <deque>
 #include <mutex>
 #include <memory>
 #include <optional>
@@ -64,8 +64,8 @@ class ARCHIVE_MANAGER_API ArchiveChunkBuffer : public BaseBuffer {
 
   void TrimToLastGOP();
 
-  std::list<std::shared_ptr<StreamBuffer>>::const_iterator begin() { std::lock_guard<std::mutex> lock(buffer_mtx_); return chunk_block_buffers_.begin(); }
-  std::list<std::shared_ptr<StreamBuffer>>::const_iterator end()  { std::lock_guard<std::mutex> lock(buffer_mtx_); return chunk_block_buffers_.end(); }
+  std::deque<std::shared_ptr<StreamBuffer>>::const_iterator begin() { std::lock_guard<std::mutex> lock(buffer_mtx_); return chunk_block_buffers_.begin(); }
+  std::deque<std::shared_ptr<StreamBuffer>>::const_iterator end()  { std::lock_guard<std::mutex> lock(buffer_mtx_); return chunk_block_buffers_.end(); }
 
  private:
   int GetInternalHeaderSize();
@@ -75,7 +75,7 @@ class ARCHIVE_MANAGER_API ArchiveChunkBuffer : public BaseBuffer {
   EncryptionType encryption_type_ = kEncryptionNone;
   unsigned long long begin_time_msec_ = ULLONG_MAX, end_time_msec_ = 0;
   std::mutex buffer_mtx_;
-  std::list<std::shared_ptr<StreamBuffer>> chunk_block_buffers_;
+  std::deque<std::shared_ptr<StreamBuffer>> chunk_block_buffers_;
 
   std::shared_ptr<char> buffer_headers_;
   int buffer_headers_size_ = 0;

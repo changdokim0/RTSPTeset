@@ -33,13 +33,14 @@
 #pragma once
 
 #ifdef _WIN32
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <Windows.h>
 #else
 #include <unistd.h>
 #endif
 
-#include <spdlog/spdlog.h>
 #include <filesystem>
 #include <optional>
 #include <iostream>

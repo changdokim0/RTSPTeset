@@ -33,7 +33,6 @@
 #include <optional>
 #include <mutex>
 #include <ctime>
-#include <spdlog/spdlog.h>
 
 #include "reader_object.h"
 #include "file_indexer.h"
@@ -60,6 +59,8 @@ class ReaderWorker
   std::shared_ptr<BaseBuffer> GetPrevData(ArchiveType get_video_type, std::shared_ptr<ReaderObject> read_object);
   std::optional<std::vector<std::shared_ptr<StreamBuffer>>> GetNextData(ArchiveType get_video_type, std::shared_ptr<ReaderObject> read_object);
   bool IsInGOP(const PnxMediaTime& time, std::shared_ptr<ReaderObject> reader_object);
+
+  std::vector<std::string> GetSearchFile();
 
  private:
   std::vector<std::filesystem::path> drives_;

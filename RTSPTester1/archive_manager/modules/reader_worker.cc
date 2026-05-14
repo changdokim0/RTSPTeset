@@ -28,6 +28,8 @@
  */
 
 #include "reader_worker.h"
+#include "blaze_logger.h"
+#include <atomic>
 
 ReaderWorker::ReaderWorker() {
 
@@ -131,15 +133,10 @@ std::shared_ptr<std::deque<Archive_FileInfo>> ReaderWorker::GetNearestFile(std::
 
 bool ReaderWorker::Seek(ChannelUUID channel_uuid, unsigned long long time_stamp_msec, ArchiveReadType archive_read_type,
                         std::shared_ptr<ReaderObject> read_object) {
-  if (time_stamp_msec < 10000) {
-    SPDLOG_ERROR("Invalid time value received in seek function. [{}]", time_stamp_msec);
-    return false;
-  }
-
   {
     std::lock_guard<std::mutex> lock(drive_mtx_);
     if (drives_.size() == 0) {
-      SPDLOG_ERROR("No drive is registered.");
+      BLAZE_LOG_ERROR("[ArchiveL] ReaderWorker::Seek failed - no drive registered. ch:[{}]", channel_uuid);
       return false;
     }
   }
@@ -154,8 +151,11 @@ bool ReaderWorker::Seek(ChannelUUID channel_uuid, unsigned long long time_stamp_
 
   std::shared_ptr<std::deque<Archive_FileInfo>> nearestfile2 =
       GetNearestFile(drives, channel_uuid, time_stamp_msec, read_object.get()->GetProfile(), archive_read_type, true);
-  if (nearestfile2 == nullptr)
+  if (nearestfile2 == nullptr) {
+    BLAZE_LOG_WARN("[ArchiveL] ReaderWorker::Seek no candidate file. ch:[{}] pos(ms):[{}] profile:[{}] read_type:[{}]", channel_uuid,
+                   time_stamp_msec, read_object.get()->GetProfile().ToString(), static_cast<int>(archive_read_type));
     return false;
+  }
 
   read_object.get()->SetInfo(channel_uuid);
   read_object.get()->SetFiles(nearestfile2);
@@ -168,19 +168,19 @@ bool ReaderWorker::Seek(ChannelUUID channel_uuid, unsigned long long time_stamp_
       file_info = read_object.get()->GetPrevFile();
 
     if (file_info == std::nullopt) {
+      BLAZE_LOG_WARN("[ArchiveL] ReaderWorker::Seek no file selected. ch:[{}] pos(ms):[{}] read_type:[{}]", channel_uuid, time_stamp_msec,
+                     static_cast<int>(archive_read_type));
       return false;
     }
 
-    if (!ParseHeader(file_info->file_path_ + "/" + file_info->file_name_, read_object))
+    if (!ParseHeader(file_info->file_path_ + "/" + file_info->file_name_, read_object)) {
       continue;
+    }
 
     bool ret = read_object.get()->LoadDataByIndex(time_stamp_msec, archive_read_type);
-    if (!ret)
-      continue;
-    else
+    if (ret) 
       break;
   }
-
   return true;
 }
 
@@ -355,3 +355,7 @@ time_t ReaderWorker::getNextHourLastSecond(time_t timestamp, int add_hour, Archi
 #endif
    return gm_timestamp;
  }
+
+std::vector<std::string> ReaderWorker::GetSearchFile() {
+
+}

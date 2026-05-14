@@ -33,6 +33,8 @@
 #include <map>
 #include <vector>
 #include <shared_mutex>
+#include <optional>
+#include <unordered_map>
 #include "reader_object.h"
 
 #include "archive_worker.h"
@@ -59,9 +61,10 @@ class ARCHIVE_MANAGER_API ArchiveManager {
   bool DeleteAllDevices(void);
   bool DeleteStream(SessionID session_id);
   bool SetDataEncryption(SessionID session_id, EncryptionType encrytion_type);
-  bool Flush(SessionID session_id);
+  bool Flush(SessionID session_id, FlushType flush_type = kFlushTypeNone);
   void ChangeArchiveSystemUUID(std::optional<std::string> prev_system_uuid, std::string target_system_uuid, std::optional<std::string> prev_server_uuid,
                                std::string target_server_uuid, std::string db_separator_name, std::function<void(bool)> callback);
+  int GetOpenFileCount();
 
   // ********** write API **********
   bool PushDataGroup(std::shared_ptr<PnxMediaArchiveDataGroup> data_group);
@@ -80,12 +83,18 @@ class ARCHIVE_MANAGER_API ArchiveManager {
   // GetMomory Frame
   std::shared_ptr<ArchiveChunkBuffer> GetMemoryFrames(std::string session_id, MediaProfile profile, int64_t timestamp);
   
+  bool GetRecordTime(const std::string session_id, const PnxMediaTime& start_time, const PnxMediaTime& end_time, const std::optional<MediaProfile> profile);
+
   // ********** Return Msg **********
   //callback aw -> am
   void CallbackWirteStatusAWTAM(SessionID session_id, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>> list);
   void CallbackWriteResult(SessionID session_id,
                            const std::function<void(SessionID session_id, bool is_success, std::shared_ptr<std::vector<FrameWriteIndexData>> infos)>& cb_func);
   void DeleteCallbackFunction(SessionID session_id);
+
+  // Channel metadata mapping
+  void RegisterChannelMetadata(const std::string& channel_uuid, const std::optional<int>& channel_index, const std::optional<std::string>& mac_address, const std::optional<std::string>& ip_address);
+  void UnregisterChannelMetadata(const std::string& channel_uuid);
 
  private:
   std::filesystem::path save_path_;
@@ -96,8 +105,11 @@ class ARCHIVE_MANAGER_API ArchiveManager {
   ReaderWorker reader_worker_;
   std::unordered_map<std::string, std::function<void(SessionID session_id, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>>)>>
       callback_writeresults_;
+  
+  std::unordered_map<std::string, std::tuple<std::optional<int>, std::optional<std::string>, std::optional<std::string>>> channel_metadata_map_;
+  std::shared_mutex channel_metadata_mutex_;
+  
   static ArchiveManager* archive_manager_;
   static std::mutex mtx;
-
   bool CheckWorkerDrive(std::string session_id, std::string save_driver, std::shared_ptr<ArchiveWorker> workerptr);
 };

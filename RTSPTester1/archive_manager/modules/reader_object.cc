@@ -29,6 +29,7 @@
  */
 
 #include "reader_object.h"
+#include "blaze_logger.h"
 
 ReaderObject::ReaderObject(MediaProfile pfofile_type) : profile_type_(pfofile_type) {
   file_indexer_ = std::make_shared<FileIndexer>();
@@ -40,11 +41,11 @@ ReaderObject::~ReaderObject() {
     if (file_handle_.is_open())
       file_handle_.close();
   } catch (const std::ios_base::failure& e) {
-    fprintf(stdout, "[%s:%d] IOStreams Exception caught in ReaderObject destructor: %s \n", __func__, __LINE__, e.what());
+    BLAZE_LOG_ERROR("IOStreams Exception caught in ReaderObject destructor: {}", e.what());
   } catch (const std::exception& e) {
-    fprintf(stdout, "[%s:%d] Exception caught in ReaderObject destructor: %s \n", __func__, __LINE__, e.what());
+    BLAZE_LOG_ERROR("Exception caught in ReaderObject destructor: {}", e.what());
   } catch (...) {
-    fprintf(stdout, "[%s:%d] Unknown exception caught in ReaderObject destructor\n", __func__, __LINE__);
+    BLAZE_LOG_ERROR("Unknown exception caught in ReaderObject destructor");
   }
 }
 
@@ -60,12 +61,12 @@ bool ReaderObject::FileOpen(std::string file_name) {
   if (file_handle_.is_open()) {
     cur_file_name_ = file_name;
     cur_file_size_ = std::filesystem::file_size(file_name);
-    SPDLOG_INFO("[ArchiveL]########### Read File Open [{}]", file_name.c_str());
+    BLAZE_LOG_INFO("[ArchiveL]########### Read File Open [{}]", file_name.c_str());
     return true;
   } else {
     cur_file_name_ = "";
     cur_file_size_ = 0;
-    SPDLOG_ERROR("[ArchiveL]########### Read File Open Fail [{}]", file_name.c_str());
+    BLAZE_LOG_ERROR("[ArchiveL]########### Read File Open Fail [{}]", file_name.c_str());
     return false;
   }
 }
@@ -106,7 +107,7 @@ bool ReaderObject::LoadDataByIndex(unsigned long long time_stamp_msec, ArchiveRe
 
   std::shared_ptr<ArchiveIndexHeader> index = file_indexer_->GetIndexHeader();
   if (index == nullptr) {
-    SPDLOG_ERROR("[ArchiveL]GetIndexHeader timestamp error");
+    BLAZE_LOG_ERROR("[ArchiveL]GetIndexHeader timestamp error");
     return false;
   }
   bool ret = false;
@@ -129,7 +130,7 @@ bool ReaderObject::LoadDataByIndex(unsigned long long time_stamp_msec, ArchiveRe
   }
 
   if (!ret) {
-    SPDLOG_ERROR("[ArchiveL] LoadData error");
+    BLAZE_LOG_ERROR("[ArchiveL] LoadData error");
     return false;
   }
 

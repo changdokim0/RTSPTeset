@@ -32,7 +32,6 @@
 #include <vector>
 #include <iomanip>
 #include <string.h>
-#include <spdlog/spdlog.h>
 
 #include "archive_define.h"
 #include "archive_object.h"

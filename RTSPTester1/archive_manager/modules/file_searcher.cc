@@ -28,7 +28,7 @@
  */
 
 #include "file_searcher.h"
-
+#include "blaze_logger.h"
 FileSearcher::FileSearcher() {
 
 }
@@ -52,7 +52,7 @@ std::optional<std::vector<std::string>> FileSearcher::GetFilesAndFolders(const s
       }
     }
   } catch (const std::exception& e) {
-    SPDLOG_ERROR("GetFilesAndFolders Error code {}", e.what());
+    BLAZE_LOG_ERROR("GetFilesAndFolders Error code {}", e.what());
     return std::nullopt;
   }
   std::sort(result.begin(), result.end());
@@ -208,14 +208,14 @@ std::optional<std::vector<Archive_FileInfo>> FileSearcher::GetNearestFileNames(f
           if (file_name.find(profile.ToString()) == std::string::npos)
             continue;
 
-          unsigned long long  timestamp = ParseFileNameToTimestamp(file_name);
+          unsigned long long timestamp = ParseFileNameToTimestamp(file_name);
           if (timestamp > 0) {
             paths.push_back(Archive_FileInfo(file_name, dir_path.string(), timestamp));
           }
         }
       }
     } catch (const std::exception& e) {
-      SPDLOG_ERROR("GetNearestFileNames Error code {}", e.what());
+      BLAZE_LOG_ERROR("GetNearestFileNames Error code {}", e.what());
       return std::nullopt;
     }
   }
@@ -337,7 +337,7 @@ unsigned int FileSearcher::TimestampFromFile(std::string file_path) {
   std::istringstream(filename.substr(0, 2)) >> minute;
 
   if (year <= 0) {
-    SPDLOG_ERROR("Failed TimestampFromFile");
+    BLAZE_LOG_ERROR("Failed TimestampFromFile");
   }
   std::tm timeInfo = {0};
   timeInfo.tm_year = year - 1900;
