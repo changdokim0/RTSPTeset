@@ -624,15 +624,15 @@ void CFileLoaderTab::InitSeeker() {
 
 void CFileLoaderTab::OnBnClickedButton1()
 {
-	PnxMediaTime begin_time, end_time;
-	begin_time.FromMilliSeconds(1778172446000);
-	end_time.FromMilliSeconds(1778431646000);
-	PnxMediaTime file_start_time = begin_time - PnxMediaTime(60 * 60); 
-	std::map<MediaProfile, SearchFileEntry> files_1;
-	std::map<MediaProfile, std::vector<SearchFileEntry>> files = reader_worker_.GetSearchFile("e98dbf3e-ea4d-46cc-8843-6507db0de46f", begin_time, end_time);
-	std::map< MediaProfile, std::vector<ArchiveTime>> archiving_times;
-	for(auto & [profile, entries] : files) {
-		std::vector<ArchiveTime> archiving_time = reader_worker_.GetTimeInfo(entries, begin_time, end_time, profile);
-		archiving_times.emplace(profile, archiving_time);
-	}
+	//PnxMediaTime begin_time, end_time;
+	//begin_time.FromMilliSeconds(1778172446000);
+	//end_time.FromMilliSeconds(1778431646000);
+	//PnxMediaTime file_start_time = begin_time - PnxMediaTime(60 * 60); 
+	//std::map<MediaProfile, SearchFileEntry> files_1;
+	//std::map<MediaProfile, std::vector<SearchFileEntry>> files = reader_worker_.GetSearchFile("e98dbf3e-ea4d-46cc-8843-6507db0de46f", begin_time, end_time);
+	//std::map< MediaProfile, std::vector<ArchiveTime>> archiving_times;
+	//for(auto & [profile, entries] : files) {
+	//	std::vector<ArchiveTime> archiving_time = reader_worker_.GetTimeInfo(entries, begin_time, end_time, profile);
+	//	archiving_times.emplace(profile, archiving_time);
+	//}
 }
