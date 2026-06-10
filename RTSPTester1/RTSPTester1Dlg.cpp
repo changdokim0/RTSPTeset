@@ -66,6 +66,17 @@ CRTSPTester1Dlg::CRTSPTester1Dlg(CWnd* pParent /*=nullptr*/)
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
 
+CRTSPTester1Dlg::~CRTSPTester1Dlg() {
+	if (RtspReceiver) {
+		delete RtspReceiver;
+		RtspReceiver = nullptr;
+	}
+	if (FileLoaderTab) {
+		delete FileLoaderTab;
+		FileLoaderTab = nullptr;
+	}
+}
+
 void CRTSPTester1Dlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialogEx::DoDataExchange(pDX);
