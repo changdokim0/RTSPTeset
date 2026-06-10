@@ -83,8 +83,6 @@ class ARCHIVE_MANAGER_API ArchiveManager {
   // GetMomory Frame
   std::shared_ptr<ArchiveChunkBuffer> GetMemoryFrames(std::string session_id, MediaProfile profile, int64_t timestamp);
   
-  bool GetRecordTime(const std::string session_id, const PnxMediaTime& start_time, const PnxMediaTime& end_time, const std::optional<MediaProfile> profile);
-
   // ********** Return Msg **********
   //callback aw -> am
   void CallbackWirteStatusAWTAM(SessionID session_id, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>> list);

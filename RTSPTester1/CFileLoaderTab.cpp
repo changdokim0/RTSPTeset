@@ -359,24 +359,6 @@ std::string CFileLoaderTab::formatTimestamp(long long timestampMs) {
 	return oss.str(); // 형식화된 문자열 반환
 }
 
-void CFileLoaderTab::OnBnClickedButton1()
-{
-	//return;
-
-	//CString strSeekTime;
-	//m_FileSeekTimeEdit.GetWindowText(strSeekTime);
-	//long long neekTime = _ttoll(strSeekTime);
-	//read_object_.get()->LoadDataByIndex(neekTime, ArchiveReadType::kArchiveReadNext);
-
-	//std::shared_ptr<ArchiveChunkBuffer> data = read_object_.get()->GetStreamGop(ArchiveChunkReadType::kArchiveChunkReadTarget);
-
-	//std::optional<std::vector<std::shared_ptr<StreamBuffer>>> buffers = read_object_.get()->GetNextData(ArchiveType::kArchiveTypeFrameVideo);
-	reader_worker_.SetData("/Hanwha Vision/BLAZE server/Archive/257fa333-0b4d-4e2a-8a14-3db873078497/c0908d4b-e331-4688-b5fe-328eb7804dc1");
-	//reader_worker_.AddDrive("C:");
-	reader_worker_.AddDrive("D:");
-}
-
-
 BOOL CFileLoaderTab::PreTranslateMessage(MSG* pMsg) {
 	if (pMsg->wParam == VK_RETURN)
 	{
@@ -523,11 +505,6 @@ void CFileLoaderTab::OnBnClickedBtnFileloadNext()
 	}
 }
 
-
-void CFileLoaderTab::InitSeeker() {
-	reader_worker_.SetData("/Hanwha Vision/BLAZE server/Archive/257fa333-0b4d-4e2a-8a14-3db873078497/c0908d4b-e331-4688-b5fe-328eb7804dc1");
-	reader_worker_.AddDrive("D:");
-}
 bool CFileLoaderTab::Seeker(ChannelUUID channel, const PnxMediaTime& time, ArchiveReadType archive_read_type, std::shared_ptr<ReaderObject> read_object)
 {
 	if (read_object == nullptr)
@@ -639,3 +616,23 @@ std::shared_ptr<PnxMediaDataGroup> CFileLoaderTab::GetNextData(std::shared_ptr<R
 	return media_datas;
 }
 
+void CFileLoaderTab::InitSeeker() {
+	reader_worker_.SetData("/Hanwha Vision/BLAZE server/Archive/f83cde01-e865-415c-baac-2065d89eaf24/a2161553-42fa-4ba4-ba27-120801d01594");
+	reader_worker_.AddDrive("F:");
+	reader_worker_.AddDrive("E:");
+}
+
+void CFileLoaderTab::OnBnClickedButton1()
+{
+	PnxMediaTime begin_time, end_time;
+	begin_time.FromMilliSeconds(1778172446000);
+	end_time.FromMilliSeconds(1778431646000);
+	PnxMediaTime file_start_time = begin_time - PnxMediaTime(60 * 60); 
+	std::map<MediaProfile, SearchFileEntry> files_1;
+	std::map<MediaProfile, std::vector<SearchFileEntry>> files = reader_worker_.GetSearchFile("e98dbf3e-ea4d-46cc-8843-6507db0de46f", begin_time, end_time);
+	std::map< MediaProfile, std::vector<ArchiveTime>> archiving_times;
+	for(auto & [profile, entries] : files) {
+		std::vector<ArchiveTime> archiving_time = reader_worker_.GetTimeInfo(entries, begin_time, end_time, profile);
+		archiving_times.emplace(profile, archiving_time);
+	}
+}

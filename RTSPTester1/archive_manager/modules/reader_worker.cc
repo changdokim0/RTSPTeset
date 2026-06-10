@@ -355,8 +355,3 @@ time_t ReaderWorker::getNextHourLastSecond(time_t timestamp, int add_hour, Archi
 #endif
    return gm_timestamp;
  }
-
-std::vector<std::string> ReaderWorker::GetSearchFile() {
-  std::vector<std::string> file_list;
-  return file_list;
-}

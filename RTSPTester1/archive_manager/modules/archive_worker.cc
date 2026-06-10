@@ -122,6 +122,7 @@ bool ArchiveWorker::DeleteStream(SessionID session_id) {
     if (it != io_workers_.end()) {
       BLAZE_LOG_INFO("[ArchiveL] DeleteStream stream_id[{}], profile[{}], use_count[{}]", 
                      stream_id.c_str(), session_id.profile.ToString(), it->second.use_count());
+      it->second->FileClose();
       io_workers_.erase(it);
     } else {
       BLAZE_LOG_ERROR("[ArchiveL] (DeleteStream) couldn't find  stream_id[{}], profile[{}]", 

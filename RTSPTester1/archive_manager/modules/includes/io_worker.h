@@ -88,6 +88,7 @@ class IOWorker {
   std::optional<std::pair<ArchiveIndexHeader, ArchiveObject>> GetNextFrame();
   void Flush(FlushType flush_type);
   bool IsFileOpen() const;
+  bool FileClose();
 
   std::function<void(SessionID session_id, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>>)>
       callback_write_status_iwtaw_;
@@ -147,7 +148,6 @@ class IOWorker {
   void FireBuffer();
   bool WriteDisk(FileHandle file_handle, char* buffer, int write_size);
   bool WriteFlushMemory(FileHandle handle);
-  bool FileClose();
   bool UpdateFileNameByCondition(FileHandle file_handle, unsigned long long timestamp);
   bool WriteFileChange(std::string filetime, unsigned long long timestamp);
   bool WriteBufferToDisk(Pnx::Media::MediaSourceFramePtr buffer_data);

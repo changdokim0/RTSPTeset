@@ -41,8 +41,6 @@
 #define ARCHIVE_MANAGER_API
 #endif
 
-#define ARCHIVE_MANAGER_API
-
 #define _CRT_SECURE_NO_WARNINGS
 
 #ifdef _WIN32
