@@ -151,8 +151,13 @@ std::shared_ptr<BaseBuffer> ReaderObject::GetPrevData(ArchiveType get_video_type
   std::shared_ptr<BaseBuffer> buffer = nullptr;
   std::shared_ptr<ArchiveIndexHeader> header = file_indexer_->GetPrevIndex();
   if (header != nullptr) {
-    if (!data_loader_->LoadData(file_handle_, *header)) {
-      return nullptr;
+    if (read_frame_type == kReadTypeIFrameOnly) {
+      if (!data_loader_->LoadPeekData(file_handle_, *header)) {
+        return nullptr;
+      }
+    } else {
+      if (!data_loader_->LoadData(file_handle_, *header))
+        return nullptr;
     }
 
     if (header->type == kArchiveTypeGopVideo || header->type == kArchiveTypeNone) {
@@ -192,17 +197,35 @@ std::optional<std::vector<std::shared_ptr<StreamBuffer>>> ReaderObject::GetNextD
         break;
     }
   }
+  if(read_frame_type == kReadTypeIFrameOnly && reader_stream_chunk.GetDataIndex() >= 1 && buffers.size() > 0) {
+    std::shared_ptr<StreamBuffer> buffer = buffers.front();
+    buffers.clear();
+    if (true) {
+      if (auto v_buffer = std::dynamic_pointer_cast<VideoData>(buffer)) {
+        if (v_buffer->archive_header.frameType == Pnx::Media::VideoFrameType::I_FRAME) {
+          buffers.push_back(buffer);
+        }
+      }
+    }
+	}
   if (buffers.size() > 0)
     return buffers;
 
   std::shared_ptr<ArchiveIndexHeader> header = file_indexer_->GetNextIndex();
   if (header != nullptr) {
-    if (!data_loader_->LoadData(file_handle_, *header)) {
-      return std::nullopt;
+    if (read_frame_type == kReadTypeIFrameOnly) {
+      if (!data_loader_->LoadPeekData(file_handle_, *header)) {
+        return std::nullopt;
+      }
+    }
+    else
+    {
+      if (!data_loader_->LoadData(file_handle_, *header))
+        return std::nullopt;
     }
 
     if (header->type == kArchiveTypeGopVideo) {
-      reader_stream_chunk.LoadFrames(data_loader_->GetData(), data_loader_->GetDataSize(), header->encryption_type);
+      reader_stream_chunk.LoadFrames(data_loader_->GetData(), data_loader_->GetDataSize(), header->encryption_type, read_frame_type);
       while (true) {
         buffer = reader_stream_chunk.GetForwardData();
         if (buffer != nullptr) {

@@ -39,19 +39,8 @@ ArchiveWorker::ArchiveWorker(std::string driver) : driver_(driver) {
 ArchiveWorker::~ArchiveWorker() {
  try {
   BLAZE_LOG_INFO("[ArchiveL] ArchiveWorker - delete worker begin : {}", driver_.string());
-   run_thread_ = false;
-   condition_release_ = true;
-   cv_.notify_all();
-
-   std::unique_lock<std::mutex> lock(mtx_threads_);
-   for (auto thread : work_threads_) {
-     if (thread) {
-       thread->join();
-       delete thread;
-     }
-   }
-   work_threads_.clear();
-   BLAZE_LOG_INFO("[ArchiveL] ArchiveWorker - delete worker end : {}", driver_.string());
+  Shutdown();
+  BLAZE_LOG_INFO("[ArchiveL] ArchiveWorker - delete worker end : {}", driver_.string());
  } catch (const std::ios_base::failure& e) {
    BLAZE_LOG_ERROR("[ArchiveL] std::ios_base::failure Exception caught in ArchiveWorker destructor: {}", e.what());
  } catch (const std::system_error& e) {
@@ -61,6 +50,31 @@ ArchiveWorker::~ArchiveWorker() {
  } catch (...) {
    BLAZE_LOG_ERROR("[ArchiveL] Unknown exception caught in ArchiveWorker destructor.");
  }
+}
+
+void ArchiveWorker::Shutdown() {
+  run_thread_ = false;
+  ++notify_epoch_;
+  cv_.notify_all();
+
+  std::vector<std::thread*> threads_to_join;
+  {
+    std::unique_lock<std::mutex> lock(mtx_threads_);
+    threads_to_join = work_threads_;
+    work_threads_.clear();
+  }
+  for (auto thread : threads_to_join) {
+    if (thread) {
+      if (thread->joinable()) thread->join();
+      delete thread;
+    }
+  }
+
+  std::unique_lock<std::shared_mutex> lock(mtx_ioworkers_);
+  for (auto& pair : io_workers_) {
+    if (pair.second) pair.second->FileClose();
+  }
+  io_workers_.clear();
 }
 
 std::shared_ptr<IOWorker> ArchiveWorker::GetIOWorker(std::string stream_id) {
@@ -115,15 +129,12 @@ bool ArchiveWorker::DeleteStream(SessionID session_id) {
   std::string stream_id = GetStreamID(session_id);
   { 
     // First, acquire both locks to ensure worker threads don't copy the shared_ptr
-    std::unique_lock<std::shared_mutex> lock_delete(mtx_io_delete_);
     std::unique_lock<std::shared_mutex> lock_workers(mtx_ioworkers_);
     
     auto it = io_workers_.find(stream_id);
     if (it != io_workers_.end()) {
       BLAZE_LOG_INFO("[ArchiveL] DeleteStream stream_id[{}], profile[{}], use_count[{}]", 
                      stream_id.c_str(), session_id.profile.ToString(), it->second.use_count());
-      it->second->FileClose();
-      io_workers_.erase(it);
     } else {
       BLAZE_LOG_ERROR("[ArchiveL] (DeleteStream) couldn't find  stream_id[{}], profile[{}]", 
                       stream_id.c_str(), session_id.profile.ToString());
@@ -132,7 +143,7 @@ bool ArchiveWorker::DeleteStream(SessionID session_id) {
   }
   
   // Notify worker threads after releasing locks
-  condition_release_ = true;
+  ++notify_epoch_;
   cv_.notify_all();
   
   return true;
@@ -151,9 +162,14 @@ bool ArchiveWorker::Flush(SessionID session_id, FlushType flush_type) {
       return false;
     }
   }
-  condition_release_ = true;
+  ++notify_epoch_;
   cv_.notify_all();
   return true;
+}
+
+void ArchiveWorker::WakeWorker() {
+  ++notify_epoch_;
+  cv_.notify_all();
 }
 
 bool ArchiveWorker::SetDataEncryption(SessionID session_id,  EncryptionType encrytion_type) {
@@ -182,18 +198,30 @@ void ArchiveWorker::RunWorkThread() {
       max_thread_count = IOWORKER_THREAD_MAX_COUNT_APPLIANCE;
     }
 
-    BLAZE_LOG_INFO("[ArchiveL] Worker thread {}, max_thread_count {}, started.", thread_index, max_thread_count);  
+    BLAZE_LOG_INFO("[ArchiveL] Worker[{}] thread {}, max_thread_count {}, started.", driver_.string(), thread_index, max_thread_count);  
+    uint64_t cnt = 0;
 
     while (run_thread_) {
       bool worked = false;
+      if (cnt % 100 == 0) {
+        BLAZE_LOG_INFO("Archive Worker[{}][{}] is working fine...(cnt:{})", driver_.string(), thread_index, cnt);
+        if (cnt == 1000000) {
+          cnt = 0;
+        }
+      }
+      cnt ++;
       std::vector<std::shared_ptr<IOWorker>> io_workers_v;
-      mtx_io_delete_.lock_shared();
       mtx_ioworkers_.lock_shared();
 
       int total_threads = 0;
       {
         std::unique_lock<std::mutex> lock(mtx_threads_);
         total_threads = work_threads_.size();
+      }
+
+      if (total_threads == 0) {
+        mtx_ioworkers_.unlock_shared();
+        break;
       }
 
       try {
@@ -205,9 +233,9 @@ void ArchiveWorker::RunWorkThread() {
           idx++;
         }
       } catch (const std::exception& e) {
-        BLAZE_LOG_ERROR("[ArchiveL] Exception occurred while iterating io_workers_: {}", e.what());
+        BLAZE_LOG_ERROR("[ArchiveL] Worker[{}][{}] Exception occurred while iterating io_workers_: {}", driver_.string(), thread_index, e.what());
       } catch (...) {
-        BLAZE_LOG_ERROR("[ArchiveL] Unknown exception occurred while iterating io_workers_");
+        BLAZE_LOG_ERROR("[ArchiveL] Worker[{}][{}] Unknown exception occurred while iterating io_workers_", driver_.string(), thread_index);
       }
       mtx_ioworkers_.unlock_shared();
 
@@ -216,7 +244,6 @@ void ArchiveWorker::RunWorkThread() {
       for (auto io_worker : io_workers_v) {
         worked = io_worker->ProcessBuffer(timestamp);
       }
-      mtx_io_delete_.unlock_shared();
 
       {
         std::unique_lock<std::mutex> lock(mtx_threads_);
@@ -227,9 +254,9 @@ void ArchiveWorker::RunWorkThread() {
       }
 
       if (!worked) {
+        uint64_t local_epoch = notify_epoch_;
         std::unique_lock<std::mutex> lk(cv_mtx_);
-        cv_.wait(lk, [&] { return condition_release_; });
-        condition_release_ = false;
+        cv_.wait(lk, [&] { return notify_epoch_ != local_epoch || !run_thread_; });
       }
 
       if (thread_index == 0) {  // only manager thread
@@ -242,11 +269,11 @@ void ArchiveWorker::RunWorkThread() {
         std::unique_lock<std::mutex> lock(mtx_threads_);
         size_t current_threads = work_threads_.size();
 
-        if (required_threads > current_threads) {
+        if (required_threads > current_threads && run_thread_) {
           for (size_t i = current_threads; i < required_threads; i++) {
             std::thread* new_thread = new std::thread(*worker_func, i);
             work_threads_.push_back(new_thread);
-            BLAZE_LOG_INFO("[ArchiveL] Started thread {} (total workers: {}, total threads: {})", i, worker_count, work_threads_.size());
+            BLAZE_LOG_INFO("[ArchiveL] worker[{}] Started thread {} (total workers: {}, total threads: {})", driver_.string(), i, worker_count, work_threads_.size());
           }
         }
 
@@ -258,7 +285,7 @@ void ArchiveWorker::RunWorkThread() {
           cv_.notify_all();
           thread_to_remove->join();
           delete thread_to_remove;
-          BLAZE_LOG_INFO("[ArchiveL] Stopped thread {} (total workers: {}, total threads: {})", current_threads, worker_count, reduced_threads);
+          BLAZE_LOG_INFO("[ArchiveL] worker[{}] Stopped thread {} (total workers: {}, total threads: {})", driver_.string(), current_threads, worker_count, reduced_threads);
         }
       }
     }
@@ -282,10 +309,23 @@ bool ArchiveWorker::PushVideoChunkBuffer(SessionID session_id, std::string save_
 
     ret = io_workers_[stream_id]->PushVideoChunkBuffer(save_driver, media_datas);
   }
-  condition_release_ = true;
+  ++notify_epoch_;
   cv_.notify_all();
 
   return ret;
+}
+
+std::optional<unsigned long long> ArchiveWorker::GetCurrentFileStartTime(std::string channel_uuid, MediaProfile profile_type) {
+  std::optional<unsigned long long> recording_time = std::nullopt;
+  std::shared_lock<std::shared_mutex> lock(mtx_ioworkers_);
+  for (const auto& pair : io_workers_) {
+    if (pair.second != nullptr && pair.second->GetChannelUUID() == channel_uuid && pair.second->GetSessionID().profile == profile_type) {
+      return pair.second->GetCurrentFileStartTime();
+    } else {
+      BLAZE_LOG_ERROR("[ArchiveL] worker[{}] GetRecordingTime - couldn't find channel_uuid[{}], profile[{}]", driver_.string(), channel_uuid.c_str(), profile_type.ToString());
+    }
+  }
+  return recording_time;
 }
 
 std::optional<std::pair<ArchiveIndexHeader, ArchiveObject>> ArchiveWorker::GetFrame(SessionID session_id, int time_stamp,

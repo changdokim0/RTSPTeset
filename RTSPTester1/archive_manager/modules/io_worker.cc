@@ -29,9 +29,11 @@
 
 #include "io_worker.h"
 #include "blaze_logger.h"
+#include "raid_write_optimizer.h"
 #include <chrono>
 #include <cmath>
 #include <algorithm>
+#include <iomanip>
 
 static bool debug_frame_drop_ = false;
 
@@ -43,12 +45,11 @@ IOWorker::IOWorker(SessionID session_id) : session_id_(session_id){
   if (std::filesystem::exists("/tmp/ProductModelInformation.json")) {  //appliance model
     if (session_id_.profile == MediaProfile::kSecondary) {
       dio_buffer_nomal_size = g_dio_page_size_ * 128;    // 512 KB
-      dio_buffer_busy_size = dio_buffer_nomal_size * 2;  // 1MB 
+      dio_buffer_busy_size = dio_buffer_nomal_size * 6;  // 3 MB
     } else {
       dio_buffer_nomal_size = g_dio_page_size_ * 256 * 2; // 2MB
       dio_buffer_busy_size = dio_buffer_nomal_size * 2;   // 4MB
     }
-
     //// TODO : GA v1.3 검증 이후 삭제  
     if (std::filesystem::exists("/root/debug_frame_drop")) {
       debug_frame_drop_ = true;
@@ -73,10 +74,10 @@ IOWorker::~IOWorker() {
   try {
     BLAZE_LOG_INFO("[ArchiveL] ioworker - delete stream  [{}]", stream_id_.c_str());
 
-    CheckMemoryBufferSize(0);
     time_t current_time = time(nullptr);
     unsigned int timestamp = static_cast<unsigned int>(current_time % UINT_MAX);
     ProcessBuffer(timestamp);
+    CheckMemoryBufferSize(0);
     
   } catch (const std::bad_array_new_length& e) {
     BLAZE_LOG_ERROR("[ArchiveL] bad_array_new_length Exception caught in IOWorker destructor: {}", e.what());
@@ -100,23 +101,118 @@ void IOWorker::SetPath(std::filesystem::path save_path) {
 
 bool IOWorker::PushVideoChunkBuffer(std::filesystem::path save_driver, std::shared_ptr<ArchiveChunkBuffer> media_datas) {
   if (media_datas == nullptr)    return false;
+  media_datas->SetSavingDrive(save_driver);
 
   DoEncryption(media_datas);
   {
-    if (save_driver_.string().find(save_driver.string()) == std::string::npos) {
-      if (!save_driver_.empty()) {
-        change_file_ = true;
-      }
-      save_driver_ = save_driver;
-    }
-    {
-      std::unique_lock<std::shared_mutex> lock(media_buffer_mtx_);
-      media_buffers.push(media_datas);
-    }
-    QueueCheck();
+    std::unique_lock<std::shared_mutex> lock(media_buffer_mtx_);
+    media_buffers.push(media_datas);
   }
+  QueueCheck();
   //printf("[%s]session[%s]stream[%s]profile[%s] save_driver_[%s]\n", __FUNCTION__, channel_uuid_.c_str(), stream_id_.c_str(), profile_.ToString().c_str(), save_driver_.string().c_str());
   return true;
+}
+
+// RAID 최적화된 쓰기 크기  적용 (Linux 전용)  : Read-Modify-Write 발생시키지 않도록, full stripe 의 배수로 write
+// DISK chunksize 256KB x (N-1) or (N-2)  = full stripe size
+// Primary (1.75 MB ~ 3.5 MB)  
+void IOWorker::UpdateRaidOptimizedWriteSize(const std::filesystem::path& save_driver) {
+  if (!std::filesystem::exists("/tmp/ProductModelInformation.json")) {  // Blaze model
+    return;
+  }
+#if defined(__linux__)
+  // Probe RAID geometry outside the mutex to avoid stalling the write path (ProcessBuffer).
+  io_worker_internal::RaidGeometry raid_geometry;
+  if (!io_worker_internal::TryGetRaidGeometryForPath(save_driver.string(), &raid_geometry)) {
+    raid_stripe_aligned_ = false;
+    return;
+  }
+
+  // Helper lambda to update DataFileHandle with new buffer sizes
+  auto update_buffer_handle = [this]() {
+    if (!write_file_data_handle_ || dio_buffer_busy_size > write_file_data_handle_->real_buffer_size) {
+      auto new_handle = std::make_shared<DataFileHandle>(dio_buffer_nomal_size, dio_buffer_busy_size);
+      if (write_file_data_handle_ && write_file_data_handle_->writebuffer && new_handle && new_handle->writebuffer && write_file_data_handle_->buffer_pos > 0) {
+        memcpy(new_handle->writebuffer, write_file_data_handle_->writebuffer, static_cast<std::size_t>(write_file_data_handle_->buffer_pos));
+        new_handle->buffer_pos = write_file_data_handle_->buffer_pos;
+      }
+      write_file_data_handle_ = std::move(new_handle);
+    }
+    if (write_file_data_handle_) {
+      // Keep dio_buffer_size_ at least large enough to cover existing buffer_pos to avoid shrinking
+      // the active write block while data is already buffered.
+      const int target_size = (write_file_data_handle_->buffer_pos > dio_buffer_nomal_size)
+                                  ? dio_buffer_busy_size
+                                  : dio_buffer_nomal_size;
+      write_file_data_handle_->dio_buffer_size_ = target_size;
+    }
+  };
+
+  // RAID 1에는 stripe alignment 최적화 불필요 (mirror only, no parity calculation)
+  if (raid_geometry.level == 1) {
+    raid_stripe_aligned_ = false;
+    
+    // Primary profile에만 버퍼 크기 설정 (normal: 3MB, busy: 6MB)
+    if (session_id_.profile == MediaProfile::kPrimary) {
+      dio_buffer_nomal_size = 3 * 1024 * 1024;  // 3MB
+      dio_buffer_busy_size = 6 * 1024 * 1024;   // 6MB
+      update_buffer_handle();
+      BLAZE_LOG_INFO("[ArchiveL] RAID 1 with Primary profile. Buffer size set: normal[3MB], busy[6MB]. path[{}], disks[{}]",
+                     save_driver.string(), raid_geometry.raid_disks);
+    } else {
+      BLAZE_LOG_INFO("[ArchiveL] RAID 1 detected. Stripe alignment optimization disabled. path[{}], disks[{}]",
+                     save_driver.string(), raid_geometry.raid_disks);
+    }
+    return;
+  }
+
+  // RAID5: N-1 data disks (1 parity), RAID6: N-2 data disks (2 parity)
+  const int parity_disks = (raid_geometry.level == 5) ? 1 : 2;  
+
+  const std::size_t optimized_size = static_cast<std::size_t>(raid_geometry.chunk_size) * static_cast<std::size_t>(std::max(1, raid_geometry.raid_disks - parity_disks));
+    if (optimized_size == 0 || optimized_size > static_cast<std::size_t>(std::numeric_limits<int>::max() / 2)) {
+    raid_stripe_aligned_ = false;
+    return;
+  }
+
+  BLAZE_LOG_INFO("[ArchiveL] RAID geometry detected. path[{}], raid{}, disks[{}], chunk[{}], optimized write[{}], profile[{}]",
+                save_driver.string(),
+                raid_geometry.level,
+                raid_geometry.raid_disks,
+                raid_geometry.chunk_size,
+                optimized_size,
+                session_id_.profile.ToString());
+
+
+  if (session_id_.profile == MediaProfile::kPrimary) {
+    // Primary profile: smallest multiple of optimized_size that is >= min_write_size
+    const std::size_t min_write_size = 3 * 1024 * 1024;
+    const std::size_t multiple = (min_write_size + optimized_size - 1) / optimized_size;
+    dio_buffer_nomal_size = static_cast<int>(optimized_size * multiple);
+    dio_buffer_busy_size = dio_buffer_nomal_size*2;
+
+  } else {
+    dio_buffer_nomal_size = static_cast<int>(optimized_size);      // Secondary/Tertiary: 1x optimized size
+    if(dio_buffer_nomal_size < 1024* 1024) {
+      dio_buffer_busy_size = dio_buffer_nomal_size*2;
+    } else {
+      dio_buffer_busy_size = dio_buffer_nomal_size;
+    }   
+  }  
+
+  raid_full_stripe_size_ = optimized_size;
+  raid_stripe_aligned_ = true;
+  update_buffer_handle();
+
+  BLAZE_LOG_INFO("[ArchiveL] RAID optimized write size applied. path[{}], raid{}, disks[{}], chunk[{}], write[{}]",
+                 save_driver.string(),
+                 raid_geometry.level,
+                 raid_geometry.raid_disks,
+                 raid_geometry.chunk_size,
+                 dio_buffer_nomal_size);
+#else
+  (void)save_driver;
+  #endif
 }
 
 bool IOWorker::ProcessBuffer(unsigned int current_time) {
@@ -137,6 +233,19 @@ bool IOWorker::ProcessBuffer(unsigned int current_time) {
 
       base_data = media_buffers.front();
       media_buffers.pop();
+      auto archive_chunk_buffer = std::dynamic_pointer_cast<ArchiveChunkBuffer>(base_data);
+      if (base_data && archive_chunk_buffer) {
+        auto saving_drive = archive_chunk_buffer->GetSavingDrive();
+        if (!saving_drive.empty()) {
+          if (save_driver_.string().find(saving_drive.string()) == std::string::npos) {
+            if (!save_driver_.empty()) {
+              change_file_ = true;
+            }
+            save_driver_ = saving_drive;
+            UpdateRaidOptimizedWriteSize(save_driver_);
+          }
+        }
+      }
     }
 
     if (base_data == nullptr)
@@ -172,8 +281,14 @@ bool IOWorker::ProcessChunkBuffers(std::shared_ptr<ArchiveChunkBuffer> gop_buffe
     index_buffer_info_.Clear();
     return false;
   }
+  
+  if (!WriteBlockInfo(gop_buffers)) {
+    BLAZE_LOG_ERROR("[ArchiveL] [{}][{}][{}] WriteBlockInfo error", channel_uuid_, stream_id_, profile_.ToString());
+    CallbackWirteStatusIWTAW(session_id_, false, gop_buffers->GetFrameInfos(save_driver_.string()));
+    return false;
+  }
 
-  WriteBlockInfo(gop_buffers);
+
   bool fail = false;
   auto buffers = std::make_shared<ArchiveChunkBuffer>();
   while (true) {
@@ -216,15 +331,9 @@ bool IOWorker::WriteIndexInfo(ArchiveType archive_type, int packet_size, unsigne
     BLAZE_LOG_ERROR("[ArchiveL] Header index buffer over flow!!!!! need size up!!  [{}], profile[{}]", channel_uuid_.c_str(), profile_.ToString().c_str());
     return false;
   }
-  
-  long long write_start_offset = (write_file_indexer_handle.buffer_pos / g_dio_page_size_) * g_dio_page_size_;
-  
-  if (!platform_file_.SetDatFilePosition(file_handle_, write_start_offset)) {
-    BLAZE_LOG_ERROR("[ArchiveL] PlatformFile::SetDatFilePosition to offset[{}] Fail [{}], profile[{}]", write_start_offset, channel_uuid_.c_str(),
-    profile_.ToString().c_str());
-    return false;
-  }
-  
+
+  const int entry_start_offset = write_file_indexer_handle.buffer_pos;
+
   ArchiveIndexHeader archive_index_header;
   archive_index_header.type = archive_type;
   archive_index_header.file_offset = current_file_position + write_file_data_handle_->buffer_pos;
@@ -232,43 +341,132 @@ bool IOWorker::WriteIndexInfo(ArchiveType archive_type, int packet_size, unsigne
   archive_index_header.begin_timestamp_msec = begin_timestramp_msec;
   archive_index_header.end_timestamp_msec = end_timestramp_msec;
   archive_index_header.encryption_type = encryption_type;
-  
+
   memcpy(write_file_indexer_handle.writebuffer + write_file_indexer_handle.buffer_pos, &archive_index_header, sizeof(ArchiveIndexHeader));
   write_file_indexer_handle.buffer_pos += sizeof(ArchiveIndexHeader);
   write_file_indexer_handle.archive_indexers_.push_back(archive_index_header);
-  
-  long long data_to_write_size = write_file_indexer_handle.buffer_pos - write_start_offset;
-  long long aligned_write_size = (data_to_write_size / g_dio_page_size_ + 1) * g_dio_page_size_;
-  
+
+  if (index_dirty_start_offset_ < 0 || entry_start_offset < index_dirty_start_offset_) {
+    index_dirty_start_offset_ = entry_start_offset;
+  }
+  return true;
+}
+
+bool IOWorker::FlushIndexInfoToDisk() {
+  if (index_dirty_start_offset_ < 0) {
+    return true;
+  }
+
+  constexpr int kIndexFileHeaderSize = 6;  // "PFFT"(4) + version(2)
+
+  long long current_file_position = platform_file_.GetDatFilePosition(file_handle_);
+  if (current_file_position < 0) {
+    BLAZE_LOG_ERROR("[ArchiveL] PlatformFile::GetDatFilePosition Fail while flushing index [{}], profile[{}]",
+                    channel_uuid_.c_str(), profile_.ToString().c_str());
+    return false;
+  }
+
+  int safe_index_count = flushed_index_count_;
+  const long long persisted_end_offset = current_file_position;
+  while (safe_index_count < static_cast<int>(write_file_indexer_handle.archive_indexers_.size())) {
+    const auto& header = write_file_indexer_handle.archive_indexers_[safe_index_count];
+    const long long indexed_end_offset = static_cast<long long>(header.file_offset) + static_cast<long long>(header.packet_size);
+    if (indexed_end_offset <= persisted_end_offset) {
+      ++safe_index_count;
+      continue;
+    }
+    break;
+  }
+
+  if (safe_index_count <= flushed_index_count_) {
+    return true;
+  }
+
+  const int safe_buffer_pos = kIndexFileHeaderSize + safe_index_count * static_cast<int>(sizeof(ArchiveIndexHeader));
+  if (safe_buffer_pos <= index_dirty_start_offset_) {
+    flushed_index_count_ = safe_index_count;
+    return true;
+  }
+
+  const int write_start_offset = (index_dirty_start_offset_ / g_dio_page_size_) * g_dio_page_size_;
+  const long long raw_write_size = static_cast<long long>(safe_buffer_pos) - write_start_offset;
+  if (raw_write_size <= 0) {
+    flushed_index_count_ = safe_index_count;
+    return true;
+  }
+
+  long long aligned_write_size = ((raw_write_size + g_dio_page_size_ - 1) / g_dio_page_size_) * g_dio_page_size_;
   if (write_start_offset + aligned_write_size > g_dio_indexer_size_) {
     aligned_write_size = g_dio_indexer_size_ - write_start_offset;
   }
-  
+
+  const int tail_offset = safe_buffer_pos;
+  const int tail_size = static_cast<int>(aligned_write_size - raw_write_size);
+  std::string tail_backup;
+  if (tail_size > 0) {
+    tail_backup.assign(write_file_indexer_handle.writebuffer + tail_offset, tail_size);
+    memset(write_file_indexer_handle.writebuffer + tail_offset, 0, tail_size);
+  }
+
+  if (!platform_file_.SetDatFilePosition(file_handle_, write_start_offset)) {
+    if (tail_size > 0) {
+      memcpy(write_file_indexer_handle.writebuffer + tail_offset, tail_backup.data(), tail_size);
+    }
+    BLAZE_LOG_ERROR("[ArchiveL] PlatformFile::SetDatFilePosition to offset[{}] Fail [{}], profile[{}]",
+                    write_start_offset, channel_uuid_.c_str(), profile_.ToString().c_str());
+    return false;
+  }
+
   if (!platform_file_.FileWrite(file_handle_, write_file_indexer_handle.writebuffer + write_start_offset, aligned_write_size)) {
-    BLAZE_LOG_ERROR("[ArchiveL] PlatformFile::FileWrite Fail  [{}], profile[{}]", channel_uuid_.c_str(), profile_.ToString().c_str());
-    write_file_indexer_handle.buffer_pos -= sizeof(ArchiveIndexHeader);
-    write_file_indexer_handle.archive_indexers_.pop_back();
+    if (tail_size > 0) {
+      memcpy(write_file_indexer_handle.writebuffer + tail_offset, tail_backup.data(), tail_size);
+    }
+    BLAZE_LOG_ERROR("[ArchiveL] PlatformFile::FileWrite Fail while flushing index [{}], profile[{}]",
+                    channel_uuid_.c_str(), profile_.ToString().c_str());
     if (!platform_file_.SetDatFilePosition(file_handle_, current_file_position)) {
-      BLAZE_LOG_ERROR("[ArchiveL] PlatformFile::SetDatFilePosition Fail  [{}], profile[{}]", channel_uuid_.c_str(), profile_.ToString().c_str());
+      BLAZE_LOG_ERROR("[ArchiveL] PlatformFile::SetDatFilePosition restore Fail [{}], profile[{}]",
+                      channel_uuid_.c_str(), profile_.ToString().c_str());
     }
     return false;
   }
-  
+
   if (!platform_file_.SetDatFilePosition(file_handle_, current_file_position)) {
-    BLAZE_LOG_ERROR("[ArchiveL] PlatformFile::SetDatFilePosition Fail  [{}], profile[{}]", channel_uuid_.c_str(), profile_.ToString().c_str());
+    if (tail_size > 0) {
+      memcpy(write_file_indexer_handle.writebuffer + tail_offset, tail_backup.data(), tail_size);
+    }
+    BLAZE_LOG_ERROR("[ArchiveL] PlatformFile::SetDatFilePosition restore Fail [{}], profile[{}]",
+                    channel_uuid_.c_str(), profile_.ToString().c_str());
     return false;
+  }
+
+  if (tail_size > 0) {
+    memcpy(write_file_indexer_handle.writebuffer + tail_offset, tail_backup.data(), tail_size);
+  }
+
+  flushed_index_count_ = safe_index_count;
+  if (safe_buffer_pos >= write_file_indexer_handle.buffer_pos) {
+    index_dirty_start_offset_ = -1;
+  } else {
+    index_dirty_start_offset_ = safe_buffer_pos;
   }
   return true;
 }
 
 bool IOWorker::WriteBlockInfo(std::shared_ptr<BaseBuffer> base_buffer) {
   if (auto gop_buffers = std::dynamic_pointer_cast<ArchiveChunkBuffer>(base_buffer)) {
-    int buffer_size = gop_buffers.get()->GetHeadersSize();
-    if (index_block_info_.GetBufferSize() < buffer_size) {
-      index_block_info_.SetBufferSize(buffer_size);
+    auto headers_memory = gop_buffers->GetHeadersMemory();
+    unsigned int headers_size = gop_buffers->GetHeadersSize();
+
+    if (headers_memory == nullptr) {
+      BLAZE_LOG_ERROR("[ArchiveL] GetHeadersMemory returned nullptr");
+      return false;
     }
-    index_block_info_.GetBuffer().get()->size = buffer_size;
-    memcpy(index_block_info_.GetBuffer().get()->data.get(), gop_buffers.get()->GetHeadersMemory().get(), gop_buffers.get()->GetHeadersSize());
+
+    if (index_block_info_.GetBufferSize() < headers_size) {
+      index_block_info_.SetBufferSize(headers_size);
+    }
+    index_block_info_.GetBuffer()->size = headers_size;
+    memcpy(index_block_info_.GetBuffer()->data.get(), headers_memory.get(), headers_size);
   } else {
     return false;
   }
@@ -317,12 +515,19 @@ bool IOWorker::WriteDisk(FileHandle handle, char* buffer, int write_size) {
     return false;
   }
 
+  if (!FlushIndexInfoToDisk()) {
+    BLAZE_LOG_ERROR("[ArchiveL] FlushIndexInfoToDisk failed");
+    WriteDiskFail();
+    return false;
+  }
+
   bitrate_monitor_.AddData(write_size);
   // success
   WriteDiskSuccess();
 
-  if (write_file_indexer_handle.buffer_pos >= sizeof(ArchiveIndexHeader))
-    file_index_last_pos_ = write_file_indexer_handle.buffer_pos - sizeof(ArchiveIndexHeader);
+  constexpr int kIndexFileHeaderSize = 6;  // "PFFT"(4) + version(2)
+  // Roll back to the next write position after the last safely flushed entry.
+  file_index_last_pos_ = kIndexFileHeaderSize + flushed_index_count_ * static_cast<int>(sizeof(ArchiveIndexHeader));
 
   write_file_data_handle_->buffer_pos = 0;
   return true;
@@ -370,7 +575,7 @@ bool IOWorker::WriteFileChange(std::string filetime, unsigned long long timestam
 bool IOWorker::FileClose() {
   if (file_handle_ != InvalidHandle) {
 
-    if (!WriteRemain(file_handle_, write_file_data_handle_->buffer_pos)) {
+    if (!WriteRemain(file_handle_, write_file_data_handle_->buffer_pos, true)) {
       file_handle_ = InvalidHandle;
       return false;
     }
@@ -389,6 +594,10 @@ bool IOWorker::FileClose() {
 bool IOWorker::InitBuffer() {
   write_file_indexer_handle.buffer_pos = 0;
   write_file_indexer_handle.archive_indexers_.clear();
+  memset(write_file_indexer_handle.writebuffer, 0, g_dio_indexer_size_);
+
+  index_dirty_start_offset_ = -1;
+  flushed_index_count_ = 0;
 
   int write_size = 4;
   memcpy(write_file_indexer_handle.writebuffer, "PFFT", write_size);
@@ -398,13 +607,61 @@ bool IOWorker::InitBuffer() {
   write_size = 2;
   memcpy(write_file_indexer_handle.writebuffer + write_file_indexer_handle.buffer_pos, &file_version, write_size);
   write_file_indexer_handle.buffer_pos += write_size;
+  file_index_last_pos_ = 6;  // "PFFT"(4) + version(2)
 
   if (!platform_file_.FileWrite(file_handle_, write_file_indexer_handle.writebuffer, g_dio_indexer_size_)) {
     BLAZE_LOG_ERROR("[ArchiveL] PlatformFile::FileWrite Fail [{}]", write_file_name_.c_str());
     return false;
   }
 
+  if (!WriteRaidAlignmentPadding()) {
+    BLAZE_LOG_ERROR("[ArchiveL] PlatformFile::FileWrite Fail (raid alignment padding) [{}]", write_file_name_.c_str());
+    return false;
+  }
+
   return true;
+}
+
+// The fixed-size index/header block (g_dio_indexer_size_, e.g. 80KB) written just above is
+// NOT a multiple of the RAID full-stripe size, so the media data region that follows it would
+// otherwise start at an offset that is not stripe-aligned - even though it's written afterwards
+// in exact full-stripe sized chunks (see UpdateRaidOptimizedWriteSize()). That misalignment forces
+// every "stripe sized" data write to straddle two physical stripes and trigger Read-Modify-Write.
+// Pad the gap between the index block and the next full-stripe boundary with zeros so the data
+// cursor (used as the base for every subsequent WriteDisk()/WriteIndexInfo() file_offset) begins
+// exactly on a stripe boundary.
+bool IOWorker::WriteRaidAlignmentPadding() {
+#if defined(__linux__)
+  if (!raid_stripe_aligned_ || dio_buffer_nomal_size <= 0 || !write_file_data_handle_ || !write_file_data_handle_->writebuffer) {
+    return true;
+  }
+
+  const std::size_t stripe_size = static_cast<std::size_t>(dio_buffer_nomal_size);
+  const std::size_t indexer_size = static_cast<std::size_t>(g_dio_indexer_size_);
+  const std::size_t aligned_data_start = ((indexer_size + stripe_size - 1) / stripe_size) * stripe_size;
+  const std::size_t padding_size = aligned_data_start - indexer_size;
+
+  if (padding_size == 0) {
+    return true;
+  }
+
+  if (padding_size > static_cast<std::size_t>(write_file_data_handle_->real_buffer_size)) {
+    BLAZE_LOG_WARN("[ArchiveL] RAID alignment padding[{}] exceeds buffer capacity[{}], skip padding",
+                   padding_size, write_file_data_handle_->real_buffer_size);
+    return true;  // fail-open: skip padding rather than block recording
+  }
+
+  memset(write_file_data_handle_->writebuffer, 0, padding_size);
+  if (!platform_file_.FileWrite(file_handle_, write_file_data_handle_->writebuffer, static_cast<int>(padding_size))) {
+    return false;
+  }
+
+  BLAZE_LOG_INFO("[ArchiveL] RAID alignment padding applied. path[{}], indexer_size[{}], padding[{}], data_start_offset[{}]",
+                 save_driver_.string(), indexer_size, padding_size, aligned_data_start);
+  return true;
+#else
+  return true;
+#endif
 }
 
 void IOWorker::FireBuffer() {
@@ -426,13 +683,28 @@ void IOWorker::FireBuffer() {
   write_file_data_handle_->buffer_pos = remain_memory;
 }
 
-bool IOWorker::WriteRemain(FileHandle hFile, int remain_size) {
+bool IOWorker::WriteRemain(FileHandle hFile, int remain_size, bool file_close) {
   int sector_size = g_dio_page_size_;
   int writes_size = 0;
   if (remain_size < sector_size)
     writes_size = sector_size;
   else
     writes_size = (remain_size / sector_size) * sector_size + sector_size;
+
+
+  // Only Appliance RAID Device.
+  // RAID: on file close only, pad the final write up to a multiple of the full stripe size to avoid Read-Modify-Write.
+  if (file_close && raid_stripe_aligned_ && raid_full_stripe_size_ > 0 && raid_full_stripe_size_ <= static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    const long long stripe = static_cast<long long>(raid_full_stripe_size_);
+    const long long stripe_size = std::max<long long>(1, (static_cast<long long>(remain_size) + stripe - 1) / stripe) * stripe;
+    if (stripe_size <= write_file_data_handle_->real_buffer_size) {
+      memset(write_file_data_handle_->writebuffer + remain_size, 0, static_cast<std::size_t>(stripe_size - remain_size));
+      writes_size = static_cast<int>(stripe_size);
+    } else {
+      BLAZE_LOG_DEBUG("[ArchiveL] WriteRemain stripe size[{}] exceeds buffer[{}], fallback to sector alignment", stripe_size,
+                     write_file_data_handle_->real_buffer_size);
+    }
+  }
 
   if (!WriteDisk(hFile, write_file_data_handle_->writebuffer, writes_size)) {
     // on failure, reset buffer pos and propagate failure
@@ -585,6 +857,9 @@ void IOWorker::WriteDiskFail() {
     BLAZE_LOG_ERROR("[ArchiveL] PlatformFile::GetDatFilePosition Fail");
   }
 
+  index_dirty_start_offset_ = -1;
+  flushed_index_count_ = static_cast<int>(write_file_indexer_handle.archive_indexers_.size());
+
   // fail
   write_file_data_handle_->buffer_pos = 0;
   std::shared_ptr<std::vector<FrameWriteIndexData>> frameinfos = index_buffer_info_.GetFrameInfos(save_driver_.string());
@@ -659,7 +934,7 @@ void IOWorker::QueueCheck() {
   // TODO : GA v1.3 검증 이후 삭제  
   ////////////////////////////////////////////
   auto buffer_size = media_buffers.size();
-  if (debug_frame_drop_ && buffer_size >= 4) {
+  if (debug_frame_drop_ && buffer_size >= 3) {
     try {           
       auto now = std::chrono::system_clock::now();
       auto time_t_now = std::chrono::system_clock::to_time_t(now);
@@ -669,7 +944,7 @@ void IOWorker::QueueCheck() {
       if (debug_log.is_open()) {
         std::tm* timeinfo = std::localtime(&time_t_now);
         debug_log << std::put_time(timeinfo, "%Y-%m-%d %H:%M:%S") << "." << std::setfill('0') << std::setw(3) << ms.count() 
-              << " [ArchiveL] warnning media_buffers.size >= 8 - session_id[" << channel_uuid_ << "], profile[" << profile_.ToString() 
+              << " [ArchiveL] warnning media_buffers.size >= 3 - session_id[" << channel_uuid_ << "], profile[" << profile_.ToString()
               << "], drive[" << save_driver_.string() << "], media_buffers.size()[" << buffer_size << "]" << std::endl;
         debug_log.close();
       }
@@ -719,12 +994,8 @@ void IOWorker::QueueCheck() {
   lock.unlock();
 
   if (frameinfos->size() > 0) {
-    if (cnt_buffer_over_ == 0) {
-      BLAZE_LOG_FLUSH_BACKTRACE();
-    }
-    cnt_buffer_over_ = cnt_buffer_over_ >= 10 ? 0 : cnt_buffer_over_ + 1;
-    BLAZE_LOG_ERROR("[ArchiveL] Buffer Over flow !!!!! session_id[{}], profile[{}], drive[{}], media_buffers.size()[{}]", channel_uuid_, profile_.ToString().c_str(), save_driver_.string(), buffer_size);
-    
+    BLAZE_LOG_ERROR("[ArchiveL] Buffer Over flow !!!!! session_id[{}], profile[{}], drive[{}], media_buffers.size()[{}]", channel_uuid_, profile_.ToString().c_str(), save_driver_.string(), buffer_size); 
+
     // TODO : GA v1.3 검증 이후 삭제 
     ////////////////////////////
     if (debug_frame_drop_) {
@@ -754,13 +1025,22 @@ void IOWorker::QueueCheck() {
 
 void IOWorker::AdjustWriteBlockSize() {
   std::unique_lock<std::shared_mutex> lock(media_buffer_mtx_);
-  if (media_buffers.size() > IOWORKER_QUEUE_MAX_COUNT / 2 + 1 && write_file_data_handle_->dio_buffer_size_ != dio_buffer_busy_size) {
+
+  std::size_t busy_switch_threshold = static_cast<std::size_t>(IOWORKER_QUEUE_MAX_COUNT / 2 + 1);
+  std::size_t normal_switch_threshold = static_cast<std::size_t>(IOWORKER_QUEUE_MAX_COUNT / 2 - 1);
+
+  if (raid_stripe_aligned_) {
+    busy_switch_threshold = 1;
+    normal_switch_threshold = 0;
+  }
+
+  if (media_buffers.size() > busy_switch_threshold && write_file_data_handle_->dio_buffer_size_ != dio_buffer_busy_size) {
     BLAZE_LOG_INFO("[ArchiveL] ++++++++++++ IOWorker Buffer Busy Change dio buffer size up session_id[{}], profile[{}], buffer_size_[{}]", channel_uuid_,
                 profile_.ToString().c_str(), media_buffers.size());
 
     write_file_data_handle_->dio_buffer_size_ = dio_buffer_busy_size;
-  } else if (media_buffers.size() <= IOWORKER_QUEUE_MAX_COUNT / 2 - 1 && write_file_data_handle_->buffer_pos < dio_buffer_nomal_size &&
-             write_file_data_handle_->dio_buffer_size_ != dio_buffer_nomal_size) {
+  } else if (media_buffers.size() <= normal_switch_threshold && write_file_data_handle_->buffer_pos < dio_buffer_nomal_size &&
+            write_file_data_handle_->dio_buffer_size_ != dio_buffer_nomal_size) {
     BLAZE_LOG_INFO("[ArchiveL] ------------ IOWorker Buffer Normal Change dio buffer size down session_id[{}], profile[{}], buffer_size_[{}]", channel_uuid_,
                 profile_.ToString().c_str(), media_buffers.size());
 
@@ -898,6 +1178,7 @@ void IOWorker::CheckMemoryBufferSize(int max_buffer_count) {
 }
 
 void IOWorker::CreateDeviceInfoFile() {
+  std::lock_guard<std::mutex> lock(mtx_channel_metadata_);
   if (!channel_index_.has_value()) {
     return;
   }

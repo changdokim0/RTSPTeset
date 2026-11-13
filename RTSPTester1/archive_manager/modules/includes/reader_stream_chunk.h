@@ -43,7 +43,7 @@ class ReaderStreamChunk {
   ReaderStreamChunk();
   ~ReaderStreamChunk();
 
-  bool LoadFrames(std::shared_ptr<char> data, int data_size, EncryptionType encryption_type);
+  bool LoadFrames(std::shared_ptr<char> data, int data_size, EncryptionType encryption_type, ReadFrameType read_frame_type = kReadTypeAllFrame);
   std::shared_ptr<StreamBuffer> GetForwardData();
   std::shared_ptr<StreamBuffer> GetCurrentData();
   std::shared_ptr<ArchiveChunkBuffer> GetStreamGop(unsigned long long& timestamp_msec, ArchiveChunkReadType GovReadType);
@@ -51,6 +51,7 @@ class ReaderStreamChunk {
   bool SeekToTime(unsigned long long& t_msec, ArchiveReadType archive_read_type);
   bool IsInGOP(const PnxMediaTime& time);
   float GetFrameDuration();
+	int GetDataIndex() { return data_index_; }
 
  private:
   StreamCryptor stream_crytor_;

@@ -58,7 +58,7 @@ class ARCHIVE_MANAGER_API FileSearcher {
   static std::optional<std::vector<std::string>> GetFilesAndFolders(const std::string directory, bool is_directory);
   static std::optional<std::string> GetNearestFile(fs::path path, std::string file_name, MediaProfile profile, ArchiveReadType archive_read_type);
   static std::optional<std::string> GetNearestFolder(fs::path base_path, fs::path search_path, fs::path init_path, int path_level, int init_level,
-                                                     ArchiveReadType archive_read_type);
+                                                     ArchiveReadType archive_read_type, int recursion_depth = 0);
 
   static unsigned int TimestampFromFile(std::string file_path);
   static unsigned long long ParseFileNameToTimestamp(std::string filename);

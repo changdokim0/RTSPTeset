@@ -34,6 +34,7 @@
 #include <thread>
 #include <condition_variable>
 #include <functional>
+#include <atomic>
 
 #include "io_worker.h"
 #include "reader_object.h"
@@ -52,10 +53,13 @@ class ArchiveWorker {
   bool AddStream(SessionID session_id);
   bool DeleteStream(SessionID session_id);
   bool Flush(SessionID session_id, FlushType flush_type);
+  void WakeWorker();
   bool RemoveIOWorker(std::string stream_id);
   void PushStream(std::string stream_id, std::shared_ptr<IOWorker> io_worker);
   bool SetDataEncryption(SessionID session_id, EncryptionType encrytion_type);
   bool PushVideoChunkBuffer(SessionID session_id, std::string save_driver, std::shared_ptr<ArchiveChunkBuffer> media_datas);
+  std::optional<unsigned long long> GetCurrentFileStartTime(std::string channel_uuid, MediaProfile profile_type);
+  void Shutdown();
 
   // information
   std::optional<std::pair<ArchiveIndexHeader, ArchiveObject>> GetFrame(SessionID session_id, int time_stamp, std::shared_ptr<ReaderObject> read_object);
@@ -81,13 +85,13 @@ class ArchiveWorker {
   std::filesystem::path save_path_ = "";
   void RunWorkThread();
   std::map<std::string, std::shared_ptr<IOWorker>> io_workers_;
-  std::shared_mutex mtx_ioworkers_, mtx_io_delete_;
+  std::shared_mutex mtx_ioworkers_;
 
   //thread
-  bool run_thread_ = false;
+  std::atomic<bool> run_thread_ = false;
   std::vector<std::thread*> work_threads_;
   std::mutex mtx_threads_;
   std::condition_variable cv_;
   std::mutex cv_mtx_;
-  bool condition_release_ = false;
+  std::atomic<uint64_t> notify_epoch_ = 0;
 };

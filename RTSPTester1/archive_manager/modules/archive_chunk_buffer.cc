@@ -28,11 +28,13 @@
  */
 
 #include "archive_chunk_buffer.h"
+#include "chunk_header_pool.h"
 #include "blaze_logger.h"
 
 ArchiveChunkBuffer::ArchiveChunkBuffer() {
-  buffer_headers_size_ = 1024 * 100;
-  buffer_headers_ = std::shared_ptr<char>(new char[buffer_headers_size_], [](char* ptr) { delete[] ptr; });
+  header_max_size = sizeof(VideoHeader) * 100000;
+  // buffer_headers_ is taken from ChunkHeaderPool on the first GetHeadersMemory() (IOWorker::WriteBlockInfo).
+  // Queued chunks, IOWorker memory copies and playback chunks never need it.
 }
 
 ArchiveChunkBuffer::~ArchiveChunkBuffer() {
@@ -66,12 +68,12 @@ std::shared_ptr<StreamBuffer> ArchiveChunkBuffer::PopQueue() {
   return block_buffer;
 }
 
-int ArchiveChunkBuffer::GetInternalHeaderSize() {
+unsigned int ArchiveChunkBuffer::GetInternalHeaderSize() {
   // Header : TotalHeaderFileSize + HeaderCount + [type + header]+ [type + header] + ...
   return total_header_size_ + (sizeof(int) * chunk_block_buffers_.size()) + (sizeof(int) * 2);
 }
 
-int ArchiveChunkBuffer::GetHeadersSize() {
+unsigned int ArchiveChunkBuffer::GetHeadersSize() {
   std::lock_guard<std::mutex> lock(buffer_mtx_);
 
   return GetInternalHeaderSize();
@@ -92,13 +94,23 @@ std::shared_ptr<char> ArchiveChunkBuffer::GetHeadersMemory() {
   }
 
   // Header : TotalHeaderFileSize + HeaderCount + [type + header]+ [type + header] + ...
-  int size = GetInternalHeaderSize(); 
+  unsigned int size = GetInternalHeaderSize(); 
+  if (size > header_max_size)
+    return nullptr;
+
   int headersize = 0;;
-  int pos = 0;
+  unsigned int pos = 0;
   int item_count = chunk_block_buffers_.size();
   if (buffer_headers_size_ < size) {
-    buffer_headers_size_ = size;
-    buffer_headers_ = std::shared_ptr<char>(new char[buffer_headers_size_], [](char* ptr) { delete[] ptr; });
+    std::size_t capacity = 0;
+    char* block = ChunkHeaderPool::GetInstance().Acquire(size, &capacity);
+    if (block == nullptr) {
+      BLAZE_LOG_ERROR("[ArchiveL] ChunkHeaderPool Acquire failed. size[{}]", size);
+      return nullptr;
+    }
+    // The deleter returns the block to the pool on whichever thread drops the last reference.
+    buffer_headers_ = std::shared_ptr<char>(block, [capacity](char* ptr) { ChunkHeaderPool::GetInstance().Release(ptr, capacity); });
+    buffer_headers_size_ = static_cast<int>(capacity);
   }
   memcpy(buffer_headers_.get(), &size, sizeof(int));
   pos += sizeof(int);
@@ -107,6 +119,11 @@ std::shared_ptr<char> ArchiveChunkBuffer::GetHeadersMemory() {
   for (auto buffer : chunk_block_buffers_) {
     if (buffer->archive_type == kArchiveTypeFrameVideo) {
       headersize = sizeof(VideoHeader);
+      if (pos + sizeof(int) + headersize > buffer_headers_size_) {
+        BLAZE_LOG_ERROR("Buffer overflow detected! type=Video, pos={}, headersize={}, buffer_size={}", 
+                        pos, headersize, buffer_headers_size_);
+        return nullptr;
+      }
       auto* video = static_cast<VideoData*>(buffer.get());
       memcpy(buffer_headers_.get() + pos, &(buffer->archive_type), sizeof(int));
       pos += sizeof(int);
@@ -114,6 +131,11 @@ std::shared_ptr<char> ArchiveChunkBuffer::GetHeadersMemory() {
       pos += headersize;
     } else if (buffer->archive_type == kArchiveTypeAudio) {
       headersize = sizeof(AudioHeader);
+      if (pos + sizeof(int) + headersize > buffer_headers_size_) {
+        BLAZE_LOG_ERROR("Buffer overflow detected! type=Audio, pos={}, headersize={}, buffer_size={}", 
+                        pos, headersize, buffer_headers_size_);
+        return nullptr;
+      }
       auto* audio = static_cast<AudioData*>(buffer.get());
       memcpy(buffer_headers_.get() + pos, &(buffer->archive_type), sizeof(int));
       pos += sizeof(int);
@@ -121,6 +143,11 @@ std::shared_ptr<char> ArchiveChunkBuffer::GetHeadersMemory() {
       pos += headersize;
     } else if (buffer->archive_type == kArchiveTypeMeta) {
       headersize = sizeof(MetaHeader);
+      if (pos + sizeof(int) + headersize > buffer_headers_size_) {
+        BLAZE_LOG_ERROR("Buffer overflow detected! type=Meta, pos={}, headersize={}, buffer_size={}", 
+                        pos, headersize, buffer_headers_size_);
+        return nullptr;
+      }
       auto* meta = static_cast<MetaData*>(buffer.get());
       memcpy(buffer_headers_.get() + pos, &(buffer->archive_type), sizeof(int));
       pos += sizeof(int);
@@ -130,6 +157,12 @@ std::shared_ptr<char> ArchiveChunkBuffer::GetHeadersMemory() {
       BLAZE_LOG_ERROR("Unknown Type Error[{}]", (int)buffer->archive_type);
     }
   }
+  
+  // Final validation
+  if (pos != size) {
+    BLAZE_LOG_WARN("Size mismatch! calculated={}, actual={}", size, pos);
+  }
+  
   return buffer_headers_;
 }
 

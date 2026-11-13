@@ -7,6 +7,7 @@
 #include <ctime>   
 #include "CD3dVideoWnd.h"
 #include "FFmpegWrapper.h"
+#include <numeric>
 
 // CFileLoaderTab 대화 상자
 #define LIST_ITEM_INDEX		0

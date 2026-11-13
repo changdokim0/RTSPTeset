@@ -25,6 +25,9 @@
     <Filter Include="log">
       <UniqueIdentifier>{1f5544fe-1b37-4bc0-80d0-149a83485001}</UniqueIdentifier>
     </Filter>
+    <Filter Include="class">
+      <UniqueIdentifier>{44fcfc5b-6fb9-4006-a1f4-68282cf7fbbb}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="RTSPTester1.h">
@@ -108,6 +111,9 @@
     <ClInclude Include="logs\blaze_logger.h">
       <Filter>log</Filter>
     </ClInclude>
+    <ClInclude Include="archive_manager\modules\includes\chunk_header_pool.h">
+      <Filter>class</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="RTSPTester1.cpp">
@@ -166,6 +172,9 @@
     </ClCompile>
     <ClCompile Include="logs\blaze_logger.cc">
       <Filter>log</Filter>
+    </ClCompile>
+    <ClCompile Include="archive_manager\modules\chunk_header_pool.cc">
+      <Filter>class</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

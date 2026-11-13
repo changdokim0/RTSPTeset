@@ -38,11 +38,11 @@ ArchiveObjectBuffer::~ArchiveObjectBuffer() {
 
 }
 
-int ArchiveObjectBuffer::GetBufferSize() {
+unsigned int ArchiveObjectBuffer::GetBufferSize() {
   return buffer_data.get()->size;
 }
 
-void ArchiveObjectBuffer::SetBufferSize(int size) {
+void ArchiveObjectBuffer::SetBufferSize(unsigned int size) {
   buffer_data.get()->size = size;  // size + header's
   buffer_data.get()->data = std::shared_ptr<char>(new char[buffer_data.get()->size], [](char* ptr) { delete[] ptr; });
 }

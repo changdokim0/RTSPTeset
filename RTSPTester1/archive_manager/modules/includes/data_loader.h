@@ -43,6 +43,7 @@ class DataLoader {
   ~DataLoader();
   std::optional<std::pair<ArchiveIndexHeader, ArchiveObject>> LoadData(ArchiveChunkReadType achive_gov_read_type);
   bool LoadData(std::ifstream& file_handle_, ArchiveIndexHeader& index_header);
+  bool LoadPeekData(std::ifstream& file_handle_, ArchiveIndexHeader& index_header);
   const std::shared_ptr<char> GetData();
   int GetDataSize() { return data_size_; }
 

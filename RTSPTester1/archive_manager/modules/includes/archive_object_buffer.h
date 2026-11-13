@@ -35,8 +35,8 @@ class ArchiveObjectBuffer {
   ArchiveObjectBuffer();
   ~ArchiveObjectBuffer();
 
-  int GetBufferSize();
-  void SetBufferSize(int size);
+  unsigned int GetBufferSize();
+  void SetBufferSize(unsigned int size);
 
   const std::shared_ptr<ArchiveObject> GetBuffer();
 

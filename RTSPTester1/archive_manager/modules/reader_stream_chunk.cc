@@ -39,7 +39,7 @@ ReaderStreamChunk::~ReaderStreamChunk() {
 }
 
 
-bool ReaderStreamChunk::LoadFrames(std::shared_ptr<char> data, int data_size, EncryptionType encryption_type) {
+bool ReaderStreamChunk::LoadFrames(std::shared_ptr<char> data, int data_size, EncryptionType encryption_type, ReadFrameType read_frame_type) {
   data_index_ = 0;
   datas_.clear();
   if (data_size < sizeof(int))
@@ -57,6 +57,9 @@ bool ReaderStreamChunk::LoadFrames(std::shared_ptr<char> data, int data_size, En
     BLAZE_LOG_ERROR("FAIL LoadFrames Header header_size[{}], data_size[{}], header_count[{}]", header_size, data_size, header_count);
     return false;
   }
+
+  if (read_frame_type == kReadTypeIFrameOnly)
+    header_count = 1;
 
   for (int i = 0; i < header_count; i++) {
     ArchiveType archive_type = kArchiveTypeNone; 
@@ -92,6 +95,7 @@ bool ReaderStreamChunk::LoadFrames(std::shared_ptr<char> data, int data_size, En
   if (datas_.size() == 0)
     return false;
     
+  mempos = header_size;
   for (auto frame : datas_) {
     if (mempos + frame->packet_size > data_size) {
       datas_.clear();

@@ -159,3 +159,11 @@ std::shared_ptr<ArchiveIndexHeader> FileIndexer::GetNextIndex() {
 
   return archive_index_headers_[++data_index_];
 }
+
+std::shared_ptr<ArchiveIndexHeader> FileIndexer::GetFirstHeader() {
+  if (archive_index_headers_.size() < 1)
+    return nullptr;
+
+  data_index_ = 0;
+  return archive_index_headers_[data_index_];
+}

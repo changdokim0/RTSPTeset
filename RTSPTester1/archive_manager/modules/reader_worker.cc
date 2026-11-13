@@ -45,7 +45,10 @@ void ReaderWorker::SetData(std::filesystem::path save_path) {
 
 void ReaderWorker::AddDrive(std::filesystem::path drive) {
   std::lock_guard<std::mutex> lock(drive_mtx_);
-  drives_.push_back(drive);
+  auto it = std::find(drives_.begin(), drives_.end(), drive);
+  if (it == drives_.end()) {
+    drives_.push_back(drive);
+  }
 }
 
 void ReaderWorker::DelDrive(std::filesystem::path drive) {
@@ -325,33 +328,250 @@ std::optional<std::vector<std::shared_ptr<StreamBuffer>>> ReaderWorker::GetNextD
  }
 
 time_t ReaderWorker::getNextHourLastSecond(time_t timestamp, int add_hour, ArchiveReadType archive_read_type) {
-   struct tm* timeinfo = gmtime(&timestamp);
-   std::tm local_time;
-   if (timeinfo == nullptr) {
-     auto time_point = std::chrono::system_clock::from_time_t(timestamp);
-     auto utc_time = std::chrono::system_clock::to_time_t(time_point);
+   // Use a local tm (gmtime_r/gmtime_s). std::gmtime() returns a process-wide static buffer,
+   // and this function modifies the result, which would corrupt other threads' conversions.
+   std::tm tm_utc{};
 #ifdef _WIN32
-     gmtime_s(&local_time, &utc_time);  // Windows
+   const bool converted = (gmtime_s(&tm_utc, &timestamp) == 0);
 #else
-     gmtime_r(&utc_time, &local_time);  // POSIX
+   const bool converted = (gmtime_r(&timestamp, &tm_utc) != nullptr);
 #endif
-     timeinfo = &local_time;
+   if (!converted) {
+     BLAZE_LOG_ERROR("[ArchiveL] getNextHourLastSecond: failed to convert timestamp [{}]", static_cast<long long>(timestamp));
+     return timestamp;
    }
 
    if (archive_read_type == kArchiveReadNext) {
-     timeinfo->tm_hour += add_hour;
-     timeinfo->tm_min = 59;
-     timeinfo->tm_sec = 59;
+     tm_utc.tm_hour += add_hour;
+     tm_utc.tm_min = 59;
+     tm_utc.tm_sec = 59;
    } else {
-     timeinfo->tm_hour -= add_hour;
-     timeinfo->tm_min = 0;
-     timeinfo->tm_sec = 0;
+     tm_utc.tm_hour -= add_hour;
+     tm_utc.tm_min = 0;
+     tm_utc.tm_sec = 0;
    }
 
 #ifdef _WIN32
-   std::time_t gm_timestamp = _mkgmtime(timeinfo);
+   std::time_t gm_timestamp = _mkgmtime(&tm_utc);
 #else
-   std::time_t gm_timestamp = timegm(timeinfo);
+   std::time_t gm_timestamp = timegm(&tm_utc);
 #endif
    return gm_timestamp;
+ }
+
+
+std::map<MediaProfile, std::vector<SearchFileEntry>> ReaderWorker::GetSearchFile(const std::string session_id, const PnxMediaTime& begin_time,
+                                                                                  const PnxMediaTime& end_time) {
+
+   std::vector<std::filesystem::path> drives;
+   {
+     std::lock_guard<std::mutex> lock(drive_mtx_);
+     for (const auto& value : drives_) {
+       drives.push_back(value);
+     }
+   }
+   std::map<MediaProfile, std::vector<SearchFileEntry>> file_list;
+   std::vector<SearchFileEntry> forder_list;
+   std::tm begin_time_t = GetTmFromTimestamp(begin_time.ToMilliSeconds());
+   std::tm end_time_t = GetTmFromTimestamp(end_time.ToMilliSeconds());
+#ifdef _WIN32
+   std::time_t bt_t = _mkgmtime(&begin_time_t);
+   std::time_t et_t = _mkgmtime(&end_time_t);
+#else
+   std::time_t bt_t = timegm(&begin_time_t);  // POSIX non-standard but commonly available
+   std::time_t et_t = timegm(&end_time_t);
+#endif
+   // helper
+   auto format_num = [](int val, int width) -> std::string {
+     std::ostringstream oss;
+     oss << std::setfill('0') << std::setw(width) << val;
+     return oss.str();
+   };
+
+   if (bt_t == (std::time_t)-1 || et_t == (std::time_t)-1 || bt_t > et_t)
+     return file_list;
+
+   for (auto tp = std::chrono::system_clock::from_time_t(bt_t); tp <= std::chrono::system_clock::from_time_t(et_t); tp += std::chrono::hours(1)) {
+     std::time_t t = std::chrono::system_clock::to_time_t(tp);
+     std::cout << "";
+     std::tm tm = GetTmFromTimestamp(t * 1000);
+
+     for (auto& drive : drives) {
+       std::filesystem::path p = drive;
+       p /= save_path_;
+       p /= session_id;
+       p /= format_num(tm.tm_year + 1900, 4);
+       p /= format_num(tm.tm_mon + 1, 2);
+       p /= format_num(tm.tm_mday, 2);
+       p /= format_num(tm.tm_hour, 2);
+       if (std::filesystem::exists(p)) {
+         forder_list.push_back(SearchFileEntry{p.string(), drive});
+       }
+     }
+   }
+
+   for (const auto& folder : forder_list) {
+     for (auto& entry : std::filesystem::directory_iterator(folder.file_path)) {
+       if (entry.is_regular_file()) {
+         if (entry.path().filename().string().find(MediaProfile::ToString(MediaProfile::kPrimary)) != std::string::npos) {
+           file_list[MediaProfile::kPrimary].push_back(SearchFileEntry{entry.path(), folder.drive, MediaProfile::kPrimary});
+         } else {
+           file_list[MediaProfile::kSecondary].push_back(SearchFileEntry{entry.path(), folder.drive, MediaProfile::kSecondary});
+         }
+       }
+     }
+   }
+
+   for (auto& [profile, files] : file_list) {
+     std::sort(files.begin(), files.end(),
+               [](const SearchFileEntry& a, const SearchFileEntry& b) { return a.file_path.filename().string() < b.file_path.filename().string(); });
+   }
+   return file_list;
+ }
+
+ std::vector<std::shared_ptr<ArchiveTime>> ReaderWorker::GetTimeInfo(std::vector<SearchFileEntry> files, const PnxMediaTime& begin_time, const PnxMediaTime& end_time,
+                                                      MediaProfile profile) {
+   std::vector<std::shared_ptr<ArchiveTime>> archiving_times;
+   std::shared_ptr<ReaderObject> read_object = std::make_shared<ReaderObject>(MediaProfile::kAuto);
+
+   const unsigned long long elapsed_time = 2 * 1000;
+   unsigned long long main_begin = 0, main_end = 0, base_begin_time = begin_time.ToMilliSeconds(), base_end_time = end_time.ToMilliSeconds();
+   std::filesystem::path main_drive;
+   bool has_main = false;
+
+   // Filter: keep from the file just before begin_time up to end_time
+   {
+     auto it_start = files.begin();
+     auto it_stop = files.begin();
+     for (auto it = files.begin(); it != files.end(); ++it) {
+       unsigned long long ts = FileSearcher::ParseFileNameToTimestamp(it->file_path.filename().string());
+       if (ts <= base_begin_time)
+         it_start = it;
+       if (ts <= base_end_time) {
+         it_stop = it;
+       }
+     }
+     if (it_stop != files.end())
+       ++it_stop;
+     files = std::vector<SearchFileEntry>(it_start, it_stop);
+   }
+
+   for (auto& file : files) {
+     if (!ParseHeader(file.file_path.string(), read_object))
+       continue;
+
+     std::shared_ptr<FileIndexer> indexer = read_object->GetIndexer();
+     std::shared_ptr<ArchiveIndexHeader> index_header = indexer->GetFirstHeader();
+
+     while (index_header != nullptr) {
+       if (index_header->type != ArchiveType::kArchiveTypeGopVideo) {
+         index_header = indexer->GetNextIndex();
+         continue;
+       }
+
+       unsigned long long chunk_begin = index_header->begin_timestamp_msec;
+       unsigned long long chunk_end = index_header->end_timestamp_msec;
+       if ((base_begin_time > chunk_begin && base_begin_time > chunk_end) || (base_end_time < chunk_begin && base_end_time < chunk_end)) {
+         index_header = indexer->GetNextIndex();
+         continue;
+       }
+
+       if (!has_main) {
+         main_begin = chunk_begin;
+         main_end = chunk_end;
+         main_drive = file.drive;
+         has_main = true;
+       } else {
+         bool is_far = (chunk_begin > main_end + elapsed_time) || (chunk_end + elapsed_time < main_begin) || (file.drive != main_drive);
+         if (is_far) {
+           archiving_times.push_back(std::make_shared<ArchiveTime>(main_drive, profile, main_begin, main_end));
+           main_begin = chunk_begin;
+           main_end = chunk_end;
+           main_drive = file.drive;
+         } else {
+           main_begin = std::min(main_begin, chunk_begin);
+           main_end = std::max(main_end, chunk_end);
+         }
+       }
+
+       index_header = indexer->GetNextIndex();
+     }
+   }
+
+   if (has_main)
+     archiving_times.push_back(std::make_shared<ArchiveTime>(main_drive, profile, main_begin, main_end));
+
+   return archiving_times;
+ }
+
+uint64_t ReaderWorker::GetArchiveSize(const std::vector<SearchFileEntry>& files, const PnxMediaTime& begin_time, const PnxMediaTime& end_time,
+                                      MediaProfile profile, uint64_t& recording_msec) {
+  uint64_t archive_size = 0;
+  recording_msec = 0;
+  std::shared_ptr<ReaderObject> read_object = std::make_shared<ReaderObject>(MediaProfile::kAuto);
+  unsigned long long base_begin_time = begin_time.ToMilliSeconds(), base_end_time = end_time.ToMilliSeconds();
+  std::vector<std::filesystem::path> profile_files;
+  for (const auto& file : files) {
+    std::string file_name = file.file_path.filename().string();
+    unsigned long long ts = FileSearcher::ParseFileNameToTimestamp(file_name);
+    if (ts > 0 && ts <= base_end_time && std::string::npos != file_name.find(profile.ToString()))
+      profile_files.push_back(file.file_path);
+  }
+
+  std::vector<std::pair<unsigned long long, unsigned long long>> recorded_spans;
+
+  for (const auto& file_path : profile_files) {
+    if (!ParseHeader(file_path.string(), read_object))
+      continue;
+
+    std::shared_ptr<FileIndexer> indexer = read_object->GetIndexer();
+    std::shared_ptr<ArchiveIndexHeader> index_header = indexer->GetFirstHeader();
+    while (index_header != nullptr) {
+      bool is_in_range = index_header->end_timestamp_msec >= base_begin_time && index_header->begin_timestamp_msec <= base_end_time;
+      if (index_header->type == ArchiveType::kArchiveTypeGopVideo && is_in_range && index_header->packet_size > 0) {
+        archive_size += static_cast<uint64_t>(index_header->packet_size);
+
+        unsigned long long span_begin = std::max<unsigned long long>(index_header->begin_timestamp_msec, base_begin_time);
+        unsigned long long span_end = std::min<unsigned long long>(index_header->end_timestamp_msec, base_end_time);
+        if (span_begin <= span_end)  // a broken entry (begin > end) is not counted as time
+          recorded_spans.emplace_back(span_begin, span_end);
+      }
+
+      index_header = indexer->GetNextIndex();
+    }
+  }
+
+  // Recording time = length of the union of the spans. A span ends at the last frame of its GOP and the next GOP starts one frame later
+  std::sort(recorded_spans.begin(), recorded_spans.end());
+  const unsigned long long elapsed_time = 2 * 1000;
+  unsigned long long main_begin = 0, main_end = 0;
+  bool has_main = false;
+  for (const auto& [span_begin, span_end] : recorded_spans) {
+    if (has_main && span_begin <= main_end + elapsed_time) {
+      main_end = std::max(main_end, span_end);
+      continue;
+    }
+
+    if (has_main)
+      recording_msec += main_end - main_begin;
+    main_begin = span_begin;
+    main_end = span_end;
+    has_main = true;
+  }
+
+  if (has_main)
+    recording_msec += main_end - main_begin;
+
+  return archive_size;
+}
+
+ std::tm ReaderWorker::GetTmFromTimestamp(unsigned long long data_time) {
+   std::time_t secs = static_cast<std::time_t>(data_time / 1000);
+   std::tm tm{};
+#ifdef _WIN32
+   gmtime_s(&tm, &secs);  // Windows thread-safe variant
+#else
+   gmtime_r(&secs, &tm);  // POSIX
+#endif
+   return tm;
  }

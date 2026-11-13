@@ -122,9 +122,10 @@ extern int g_dio_indexer_size_;
 
 #define IOWORKER_MEMORY_BUFFER_QUEUE_MAX_COUNT 4
 #define IOWORKER_QUEUE_MAX_COUNT            16
+#define IOWORKER_QUEUE_MAX_COUNT_APPLIANCE  32 
 
 #define IOWORKER_THREAD_MAX_COUNT             100
-#define IOWORKER_THREAD_MAX_COUNT_APPLIANCE   8
+#define IOWORKER_THREAD_MAX_COUNT_APPLIANCE   4
 
 #define ARCHIVER_BUFFER_MEMORY_PERCENT        70
 #define ARCHIVER_SIMULATION_DELETE_TIME       7200  // 2 hour
@@ -218,6 +219,17 @@ struct FrameWriteIndexData {
   std::filesystem::path save_drive_;
 };
 #pragma pack(pop)
+
+
+struct ArchiveTime {
+  std::filesystem::path drive;
+  MediaProfile profile_type;
+  uint64_t begin_time;
+  uint64_t end_time;
+
+  ArchiveTime(std::filesystem::path drive, MediaProfile profile_type, uint64_t begin_time, uint64_t end_time)
+      : drive(drive), profile_type(profile_type), begin_time(begin_time), end_time(end_time) {}
+};
 
 std::string GetStreamID(SessionID session_id);
 

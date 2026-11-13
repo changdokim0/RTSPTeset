@@ -35,7 +35,7 @@
 
 class ArchiveObject {
  public:
-  int size = 0;
+  unsigned int size = 0;
   std::shared_ptr<char> data;
 };
 

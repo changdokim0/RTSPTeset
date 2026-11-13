@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <string.h>
 #include <climits>
+#include <filesystem>
 
 #include "archive_define.h"
 #include "archive_object.h"
@@ -59,8 +60,10 @@ class ARCHIVE_MANAGER_API ArchiveChunkBuffer : public BaseBuffer {
   void SetEncryptionType(EncryptionType type) { encryption_type_ = type; }
   bool IsIncludedTime(unsigned long long timestamp_msec);
   std::shared_ptr<std::vector<FrameWriteIndexData>> GetFrameInfos(std::string driver);
-  int GetHeadersSize();
+  unsigned int GetHeadersSize();
   void SetChunkTotalSize(unsigned int total_data_size) { std::lock_guard<std::mutex> lock(buffer_mtx_); total_data_size_ = total_data_size; }
+  void SetSavingDrive(const std::filesystem::path& d) { saving_drive_ = d; }; 
+  std::filesystem::path GetSavingDrive(void) { return saving_drive_; }; 
 
   void TrimToLastGOP();
 
@@ -68,14 +71,16 @@ class ARCHIVE_MANAGER_API ArchiveChunkBuffer : public BaseBuffer {
   std::deque<std::shared_ptr<StreamBuffer>>::const_iterator end()  { std::lock_guard<std::mutex> lock(buffer_mtx_); return chunk_block_buffers_.end(); }
 
  private:
-  int GetInternalHeaderSize();
+  unsigned int GetInternalHeaderSize();
   bool end_flag_ = false;
   unsigned int total_data_size_ = 0;
   unsigned int total_header_size_ = 0;
   EncryptionType encryption_type_ = kEncryptionNone;
+  unsigned int header_max_size = 0;
   unsigned long long begin_time_msec_ = ULLONG_MAX, end_time_msec_ = 0;
   std::mutex buffer_mtx_;
   std::deque<std::shared_ptr<StreamBuffer>> chunk_block_buffers_;
+  std::filesystem::path saving_drive_;
 
   std::shared_ptr<char> buffer_headers_;
   int buffer_headers_size_ = 0;

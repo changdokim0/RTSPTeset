@@ -40,6 +40,7 @@
 #include <mutex>
 #include <random>
 #include <shared_mutex>
+#include <atomic>
 
 #include "archive_object.h"
 #include "data_file_handle.h"
@@ -70,13 +71,14 @@ class IOWorker {
   std::string GetChannelUUID() { return channel_uuid_; }
   void SetDataEncryption(EncryptionType encrytion_type) { encrytion_type_ = encrytion_type; }
   void SetChannelMetadata(std::optional<int> channel_index, std::optional<std::string> mac_address, std::optional<std::string> ip_address) {
+    std::lock_guard<std::mutex> lock(mtx_channel_metadata_);
     channel_index_ = channel_index;
     mac_address_ = mac_address;
     ip_address_ = ip_address;
   }
-  std::optional<int> GetChannelIndex() const { return channel_index_; }
-  std::optional<std::string> GetMacAddress() const { return mac_address_; }
-  std::optional<std::string> GetIpAddress() const { return ip_address_; }
+  std::optional<int> GetChannelIndex() const { std::lock_guard<std::mutex> lock(mtx_channel_metadata_); return channel_index_; }
+  std::optional<std::string> GetMacAddress() const { std::lock_guard<std::mutex> lock(mtx_channel_metadata_); return mac_address_; }
+  std::optional<std::string> GetIpAddress() const { std::lock_guard<std::mutex> lock(mtx_channel_metadata_); return ip_address_; }
 
   bool PushVideoChunkBuffer(std::filesystem::path save_driver, std::shared_ptr<ArchiveChunkBuffer> media_datas);
   bool ProcessBuffer(unsigned int timestamp);
@@ -89,6 +91,7 @@ class IOWorker {
   void Flush(FlushType flush_type);
   bool IsFileOpen() const;
   bool FileClose();
+  unsigned long long GetCurrentFileStartTime() { return file_begin_timestamp_; }
 
   std::function<void(SessionID session_id, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>>)>
       callback_write_status_iwtaw_;
@@ -106,16 +109,18 @@ class IOWorker {
   std::optional<int> channel_index_;
   std::optional<std::string> mac_address_;
   std::optional<std::string> ip_address_;
+  mutable std::mutex mtx_channel_metadata_;  // channel metadata can be updated by ReplaceCamera while recording
   std::filesystem::path save_driver_;
   bool change_file_ = false;
   std::shared_ptr<DataFileHandle> write_file_data_handle_;
   FileWriteIndexer write_file_indexer_handle;
   EncryptionType encrytion_type_ = kEncryptionNone;
   StreamCryptor stream_crytor_;
-  int cnt_buffer_over_ = 0;
 
   int dio_buffer_nomal_size = g_dio_buffer_size_;
   int dio_buffer_busy_size = g_dio_buffer_size_;
+  bool raid_stripe_aligned_ = false;  // true when dio_buffer_nomal_size is a RAID full-stripe aligned size
+  std::size_t raid_full_stripe_size_ = 0;  // RAID full stripe size (chunk * data disks), valid when raid_stripe_aligned_
   ArchiveObjectBuffer index_block_info_;             // Structure information of block info
   FileWriteIndexInfo index_buffer_info_;             // Pass failure time stamp information
   std::shared_ptr<char*> cur_index_data_ = nullptr;  // When all index data is used, then write
@@ -131,6 +136,8 @@ class IOWorker {
   std::string cur_filetime;
 
   int file_index_last_pos_ = 0;  // pos for changing indexer location when write fails
+  int index_dirty_start_offset_ = -1;  // first dirty index offset pending flush
+  int flushed_index_count_ = 0;  // number of index entries safely flushed to disk
   std::shared_mutex media_buffer_mtx_;
   //std::mutex memory_mtx_;
   int file_random_number_ = 0;
@@ -144,7 +151,8 @@ class IOWorker {
 
   PlatformFile platform_file_;
   bool InitBuffer();
-  bool WriteRemain(FileHandle hFile, int remain_size);
+  bool WriteRaidAlignmentPadding();
+  bool WriteRemain(FileHandle hFile, int remain_size, bool file_close = false);
   void FireBuffer();
   bool WriteDisk(FileHandle file_handle, char* buffer, int write_size);
   bool WriteFlushMemory(FileHandle handle);
@@ -153,6 +161,7 @@ class IOWorker {
   bool WriteBufferToDisk(Pnx::Media::MediaSourceFramePtr buffer_data);
   bool WriteIndexInfo(ArchiveType archive_type, int packet_size, unsigned long long begin_timestramp_msec, unsigned long long end_timestramp_msec,
                       EncryptionType encryption_type);
+  bool FlushIndexInfoToDisk();
   bool WriteBlockInfo(std::shared_ptr<BaseBuffer> base_buffer);
   void WriteDiskSuccess();
   void WriteDiskFail();
@@ -165,6 +174,7 @@ class IOWorker {
   bool Delete_File(const std::string& filePath);
   void QueueCheck();
   void AdjustWriteBlockSize();
+  void UpdateRaidOptimizedWriteSize(const std::filesystem::path& save_driver); //for appliance, RAID optimized write size
   int GetRandomFileNumber();
   bool ProcessChunkBuffers(std::shared_ptr<ArchiveChunkBuffer> gop_buffers);
   void ProcessFlush(ArchiveType archive_type);

@@ -30,9 +30,9 @@
 #include "archive_manager.h"
 #include "archive_util.h"
 #include "blaze_logger.h"
+#include "raid_write_optimizer.h"
 
 ArchiveManager* ArchiveManager::archive_manager_ = nullptr;
-std::mutex ArchiveManager::mtx;
 
 ArchiveManager* ArchiveManager::getInstance() {
   static std::once_flag init_flag;
@@ -45,10 +45,29 @@ ArchiveManager::ArchiveManager() {
   InitailData();
 }
 
+void ArchiveManager::Destroy() {
+  BLAZE_LOG_INFO("[ArchiveL] ArchiveManager - Destroy +++");
+  destroyed_ = true;
+  std::unique_lock<std::shared_mutex> lock(mtx_worker);
+  for (auto& pair : archive_workers) {
+    if (pair.second) pair.second->Shutdown();
+  }
+  archive_workers.clear();
+  device_session_index.clear();
+  BLAZE_LOG_INFO("[ArchiveL] ArchiveManager - Destroy ---");
+}
+
+void ArchiveManager::Restart() {
+  BLAZE_LOG_INFO("[ArchiveL] ArchiveManager - Restart");
+  destroyed_ = false;
+}
 
 bool ArchiveManager::AddDevice(std::string device_driver) {
-  BLAZE_LOG_INFO("[ArchiveL] ArchiveManager - AddDevice  [{}]", device_driver);
   std::unique_lock<std::shared_mutex> lock(mtx_worker);
+  if (destroyed_)
+    return false;
+
+  BLAZE_LOG_INFO("[ArchiveL] ArchiveManager - AddDevice  [{}]", device_driver);
   if (archive_workers.find(device_driver) != archive_workers.end()) {
     BLAZE_LOG_ERROR("[ArchiveL] ArchiveManager - Fail : already disk  [{}]", device_driver);
     return false;
@@ -60,10 +79,42 @@ bool ArchiveManager::AddDevice(std::string device_driver) {
   aw->callback_write_status_awtam_ =
       std::bind(&ArchiveManager::CallbackWirteStatusAWTAM, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
   archive_workers.emplace(device_driver, aw);
+
+  {
+    std::unique_lock<std::shared_mutex> drive_lock(mtx_registered_drives_);
+    registered_drives_.insert(device_driver);
+  }
   return true;
 }
 
+bool ArchiveManager::HasDevice(std::string device_driver) {
+  std::shared_lock<std::shared_mutex> lock(mtx_worker);
+  return archive_workers.find(device_driver) != archive_workers.end();
+}
+
+std::string ArchiveManager::GetRaidInfo(const std::string& path) {
+#if defined(__linux__)
+  io_worker_internal::RaidGeometry geom;
+  if (path.empty() || !io_worker_internal::TryGetRaidGeometryForPath(path, &geom)) {
+    return "none";
+  }
+
+  std::string info = "raid" + std::to_string(geom.level) + " disks=" + std::to_string(geom.raid_disks);
+  if (geom.level == 5 || geom.level == 6) {
+    const int data_disks = geom.raid_disks - (geom.level == 5 ? 1 : 2);
+    info += " chunk=" + std::to_string(geom.chunk_size / 1024) + "K";
+    info += " full_stripe=" + std::to_string(geom.chunk_size * static_cast<std::size_t>(data_disks > 0 ? data_disks : 0) / 1024) + "K";
+  }
+  return info;
+#else
+  return "none";
+#endif
+}
+
 bool ArchiveManager::AddSession(std::string device_driver, SessionID session_id) {
+  if (destroyed_)
+    return false;
+
   // Retrieve channel metadata
   std::optional<int> channel_index;
   std::optional<std::string> mac_address;
@@ -90,6 +141,11 @@ bool ArchiveManager::AddSession(std::string device_driver, SessionID session_id)
   }
 
   std::string stream_id = GetStreamID(session_id);
+  if (device_session_index.find(stream_id) != device_session_index.end()) {
+    BLAZE_LOG_ERROR("[ArchiveL] ArchiveManager - Fail : session already exists in driver[{}] [{}][{}][{}]",
+                    device_session_index[stream_id], device_driver, session_id.channel_uuid, session_id.profile.ToString());
+    return false;
+  }
   archive_workers[device_driver]->AddStream(session_id);
   std::shared_ptr<IOWorker> io_worker = archive_workers[device_driver]->GetIOWorker(stream_id);
   if (io_worker) {
@@ -105,6 +161,10 @@ bool ArchiveManager::DeleteDevice(std::string device_driver) {
   BLAZE_LOG_INFO("[ArchiveL] ArchiveManager - DeleteDevice  [{}]", device_driver);
   std::unique_lock<std::shared_mutex> lock(mtx_worker);
   archive_workers.erase(device_driver);
+  {
+    std::unique_lock<std::shared_mutex> drive_lock(mtx_registered_drives_);
+    registered_drives_.erase(device_driver);
+  }
   return true;
 }
 
@@ -122,6 +182,33 @@ void ArchiveManager::UnregisterChannelMetadata(const std::string& channel_uuid) 
   std::unique_lock<std::shared_mutex> lock(channel_metadata_mutex_);
   channel_metadata_map_.erase(channel_uuid);
   BLAZE_LOG_INFO("[ArchiveL] UnregisterChannelMetadata - channel:[{}]", channel_uuid);
+}
+
+// Running IOWorker re-creates .deviceinfo with its own MAC/IP on every new file, so update it as well
+void ArchiveManager::UpdateChannelAddress(const std::string& channel_uuid, const std::string& mac_address, const std::string& ip_address,
+                                          int channel_index) {
+  // mac address is empty for ip camera
+  auto mac = mac_address.empty() ? std::nullopt : std::optional<std::string>(mac_address);
+  {
+    std::unique_lock<std::shared_mutex> lock(channel_metadata_mutex_);
+    auto it = channel_metadata_map_.find(channel_uuid);
+    if (it != channel_metadata_map_.end()) {
+      std::get<0>(it->second) = channel_index;
+      std::get<1>(it->second) = mac;
+      if (!ip_address.empty())
+        std::get<2>(it->second) = ip_address;
+    }
+  }
+  std::shared_lock<std::shared_mutex> lock(mtx_worker);
+  for (const auto& worker : archive_workers) {
+    for (const auto& io_worker : worker.second->GetIOWorkers()) {
+      if (io_worker.second->GetChannelUUID() == channel_uuid) {
+        auto ip = ip_address.empty() ? io_worker.second->GetIpAddress() : std::optional<std::string>(ip_address);
+        io_worker.second->SetChannelMetadata(channel_index, mac, ip);
+      }
+    }
+  }
+  BLAZE_LOG_INFO("[ArchiveL] UpdateChannelAddress - channel:[{}] mac:[{}] ip:[{}] index:[{}]", channel_uuid, mac_address, ip_address, channel_index);
 }
 
 bool ArchiveManager::DeleteStream(SessionID session_id) {
@@ -198,9 +285,9 @@ void ArchiveManager::ChangeArchiveSystemUUID(std::optional<std::string> prev_sys
 
     std::vector<std::filesystem::path> drives;
     {
-      std::shared_lock<std::shared_mutex> lock(mtx_worker);
-      for (const auto& worker : archive_workers) {
-        drives.push_back(worker.first);
+      std::shared_lock<std::shared_mutex> lock(mtx_registered_drives_);
+      for (const auto& drive : registered_drives_) {
+        drives.push_back(drive);
       }
     }
     if (drives.empty()) {
@@ -379,22 +466,34 @@ void ArchiveManager::SetSavePath(std::filesystem::path save_path) {
 
 
 bool ArchiveManager::PushDataGroup(std::shared_ptr<PnxMediaArchiveDataGroup> data_group) {
+  if (destroyed_)
+    return false;
+
   if (data_group == nullptr || data_group->GetNumber() <= 0)
     return false;
 
-  // TODO cd.kim temp code begin
   auto first_media_data = data_group->GetFirstMediaData();
   if (nullptr == first_media_data) {
     BLAZE_LOG_ERROR("[ArchiveL] ArchiveManager - Fail : first media data is null");
     return false;
   }
 
-  //purpose_
   data_group->channel_uuid = first_media_data->channel_uuid;
   MediaProfile profile = first_media_data->profile;
-  // TODO cd.kim temp code end
   SessionID session_id = SessionID(data_group->channel_uuid, data_group->purpose_, (MediaProfile)profile);
   std::string stream_id = GetStreamID(session_id);
+  bool add_session = false;
+  { 
+    //add session if not exist
+    std::unique_lock<std::shared_mutex> lock(mtx_worker);
+    std::string stream_id = GetStreamID(session_id);
+    if (device_session_index.find(stream_id) == device_session_index.end()) {
+      add_session = true;
+    }
+  }
+  if (add_session)
+    AddSession(data_group->GetArchivingDrive().string(), session_id);
+
   std::shared_ptr<ArchiveChunkBuffer> media_datas = std::make_shared<ArchiveChunkBuffer>();
   size_t num_datas = data_group->GetNumber();
   for (size_t i = 0; i < num_datas; i ++) {
@@ -424,7 +523,7 @@ bool ArchiveManager::PushDataGroup(std::shared_ptr<PnxMediaArchiveDataGroup> dat
 
   std::shared_ptr<ArchiveWorker> workerptr = nullptr;
   {
-    std::shared_lock<std::shared_mutex> lock(mtx_worker);
+    std::unique_lock<std::shared_mutex> lock(mtx_worker);
     if (device_session_index.find(stream_id) == device_session_index.end()) {
       return false;
     }
@@ -644,7 +743,7 @@ void ArchiveManager::CallbackWriteResult(
 
   std::string stream_id = GetStreamID(session_id);
   std::lock_guard<std::shared_mutex> lock(callback_mtx); //exclusive  lock
-  callback_writeresults_.emplace(stream_id, cb_func);
+  callback_writeresults_.insert_or_assign(stream_id, cb_func);
 }
 
 void ArchiveManager::DeleteCallbackFunction(SessionID session_id) {
@@ -703,6 +802,7 @@ int ArchiveManager::GetOpenFileCount() {
   std::shared_lock<std::shared_mutex> lock(mtx_worker);
   
   for (const auto& worker : archive_workers) {
+    worker.second->WakeWorker();
     std::map<std::string, std::shared_ptr<IOWorker>> io_workers = worker.second->GetIOWorkers();
     for (const auto& io_worker : io_workers) {
       if (io_worker.second->IsFileOpen()) {
@@ -712,4 +812,56 @@ int ArchiveManager::GetOpenFileCount() {
   }
   
   return total_open_files;
+}
+
+std::map<MediaProfile, std::vector<std::shared_ptr<ArchiveTime>>> ArchiveManager::GetRecordTime(const std::string session_id, const PnxMediaTime& begin_time,
+                                                                                 const PnxMediaTime& end_time) {
+
+  PnxMediaTime file_start_time = begin_time - PnxMediaTime(60 * 60);  // 60 minutes before
+  std::map<MediaProfile, std::vector<SearchFileEntry>> files = reader_worker_.GetSearchFile(session_id, file_start_time, end_time);
+  std::map<MediaProfile, std::vector<std::shared_ptr<ArchiveTime>>> archiving_times;
+  for (auto& [profile, entries] : files) {
+    std::vector<std::shared_ptr<ArchiveTime>> archiving_time = reader_worker_.GetTimeInfo(entries, begin_time, end_time, profile);
+    archiving_times.emplace(profile, archiving_time);
+  }
+  return archiving_times;
+}
+
+uint64_t ArchiveManager::GetArchiveSize(const std::string& channel_uuid, MediaProfile profile, const PnxMediaTime& begin_time, const PnxMediaTime& end_time,
+                                        uint64_t& recording_msec) {
+  recording_msec = 0;
+
+  // Start one hour folder before the one holding begin_time: a chunk crossing the hour stays in the previous folder.
+  // The start must be on the hour: GetSearchFile steps one hour at a time from it and would otherwise skip the folder of end_time.
+  const uint64_t hour_msec = 60 * 60 * 1000;
+  uint64_t begin_hour_msec = begin_time.ToMilliSeconds() - begin_time.ToMilliSeconds() % hour_msec;
+  PnxMediaTime file_start_time;
+  file_start_time.FromMilliSeconds(begin_hour_msec >= hour_msec ? begin_hour_msec - hour_msec : 0);
+
+  std::map<MediaProfile, std::vector<SearchFileEntry>> files = reader_worker_.GetSearchFile(channel_uuid, file_start_time, end_time);
+  auto it = files.find(profile);
+  if (files.end() == it)
+    return 0;
+
+  return reader_worker_.GetArchiveSize(it->second, begin_time, end_time, profile, recording_msec);
+}
+
+std::optional<unsigned long long> ArchiveManager::GetCurrentFileStartTime(std::string channel_uuid, MediaProfile profile_type) {
+  std::optional<unsigned long long> recording_time = std::nullopt; 
+  SessionID session_id = SessionID(channel_uuid, PnxMediaArchiveInfo::EPurpose::kRecord, profile_type);
+  std::string stream_id = GetStreamID(session_id);
+
+  std::shared_ptr<ArchiveWorker> workerptr = nullptr;
+  {
+    std::shared_lock<std::shared_mutex> lock(mtx_worker);
+    if (device_session_index.find(stream_id) == device_session_index.end()) {
+      return std::nullopt;
+    }
+    workerptr = archive_workers[device_session_index[stream_id]];
+    if (workerptr == nullptr)
+      return std::nullopt;
+
+    recording_time = workerptr->GetCurrentFileStartTime(channel_uuid, profile_type);
+  }
+  return recording_time;
 }

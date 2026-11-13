@@ -29,6 +29,23 @@
 
 #include "file_searcher.h"
 #include "blaze_logger.h"
+
+constexpr int kMaxGetNearestFolderRecursionDepth = 64;
+
+namespace {
+// Thread-safe UTC conversion.
+// std::gmtime()/std::localtime() return a pointer to a process-wide static buffer on glibc,
+// so concurrent callers (IOWorker / reader threads) can overwrite each other's result and
+// produce a torn date (e.g. year/hour from one call, month/day from another).
+bool ToUtcTm(std::time_t timestamp, std::tm& out) {
+#ifdef _WIN32
+  return gmtime_s(&out, &timestamp) == 0;
+#else
+  return gmtime_r(&timestamp, &out) != nullptr;
+#endif
+}
+}  // namespace
+
 FileSearcher::FileSearcher() {
 
 }
@@ -60,25 +77,15 @@ std::optional<std::vector<std::string>> FileSearcher::GetFilesAndFolders(const s
 }
 
 std::string FileSearcher::GetFolderFrTime(unsigned long long data_time) {
-  std::string file_time;
-  std::time_t timestamp = static_cast<std::time_t>(data_time / 1000);
-  std::tm* timeinfo = std::gmtime(&timestamp);
-  std::tm local_time;
-  if (timeinfo == nullptr) {
-    auto time_point = std::chrono::system_clock::from_time_t(timestamp);
-    auto utc_time = std::chrono::system_clock::to_time_t(time_point);
-#ifdef _WIN32
-    gmtime_s(&local_time, &utc_time);  // Windows
-#else
-    gmtime_r(&utc_time, &local_time);  // POSIX
-#endif
-    timeinfo = &local_time;
+  const std::time_t timestamp = static_cast<std::time_t>(data_time / 1000);
+  std::tm tm_utc{};
+  if (!ToUtcTm(timestamp, tm_utc)) {
+    BLAZE_LOG_ERROR("[ArchiveL] GetFolderFrTime: failed to convert timestamp [{}]", data_time);
   }
 
   char time_str[40] = {0,};
-  std::snprintf(time_str, sizeof(time_str), "%04d/%02d/%02d/%02d", timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday, timeinfo->tm_hour);
-  file_time = time_str;
-  return file_time;
+  std::snprintf(time_str, sizeof(time_str), "%04d/%02d/%02d/%02d", tm_utc.tm_year + 1900, tm_utc.tm_mon + 1, tm_utc.tm_mday, tm_utc.tm_hour);
+  return time_str;
 }
 
 std::optional<std::string> FileSearcher::GetNearestFile(fs::path path, std::string file_name, MediaProfile profile, ArchiveReadType archive_read_type) {
@@ -111,16 +118,22 @@ std::optional<std::string> FileSearcher::GetNearestFile(fs::path path, std::stri
 }
 
 std::optional<std::string> FileSearcher::GetNearestFolder(fs::path base_path, fs::path search_path, fs::path init_path, int path_level, int init_level,
-                                                          ArchiveReadType archive_read_type) {
+                                                          ArchiveReadType archive_read_type, int recursion_depth) {
   if (path_level <= 0)
     return std::nullopt;
+
+  if (recursion_depth >= kMaxGetNearestFolderRecursionDepth) {
+    BLAZE_LOG_ERROR("GetNearestFolder exceeded max recursion depth[{}]. base_path[{}] search_path[{}]", kMaxGetNearestFolderRecursionDepth,
+                    base_path.string(), search_path.string());
+    return std::nullopt;
+  }
 
   fs::path full_path = base_path / search_path;
   full_path = full_path.generic_string();
   std::optional<std::string> folder_name = std::nullopt;
   std::optional<std::vector<std::string>> files_folders = GetFilesAndFolders(full_path.string(), true);
   if (files_folders == std::nullopt) {
-    return GetNearestFolder(base_path, search_path.parent_path(), init_path, --path_level, init_level, archive_read_type);
+    return GetNearestFolder(base_path, search_path.parent_path(), init_path, --path_level, init_level, archive_read_type, recursion_depth + 1);
   }
 
   fs::path t_path = init_path;
@@ -144,7 +157,7 @@ std::optional<std::string> FileSearcher::GetNearestFolder(fs::path base_path, fs
                                                                                     [&](const std::string& s) { return s < t_path.string(); }));
   }
   if (result.size() == 0)
-    return GetNearestFolder(base_path, search_path.parent_path(), init_path, --path_level, init_level, archive_read_type);
+    return GetNearestFolder(base_path, search_path.parent_path(), init_path, --path_level, init_level, archive_read_type, recursion_depth + 1);
   std::sort(result.begin(), result.end());
 
   if (archive_read_type == kArchiveReadNext) {
@@ -165,12 +178,12 @@ std::optional<std::string> FileSearcher::GetNearestFolder(fs::path base_path, fs
   }
 
   if (folder_name == std::nullopt)
-    return GetNearestFolder(base_path, search_path.parent_path(), init_path, --path_level, init_level, archive_read_type);
+    return GetNearestFolder(base_path, search_path.parent_path(), init_path, --path_level, init_level, archive_read_type, recursion_depth + 1);
 
   if (path_level == init_level)
     return folder_name;
   else
-    return GetNearestFolder(base_path, folder_name.value(), init_path, ++path_level, init_level, archive_read_type);
+    return GetNearestFolder(base_path, folder_name.value(), init_path, ++path_level, init_level, archive_read_type, recursion_depth + 1);
 }
 
 // Just send the closest file from the entire drive.
@@ -295,24 +308,15 @@ std::optional<std::vector<Archive_FileInfo>> FileSearcher::GetNearestFileNames(f
 
 std::string FileSearcher::GetDatFileName(std::filesystem::path save_path, std::string session_id, std::string filetime, MediaProfile profile,
                                          long long begin_timestamp_msec) {
-  std::string file_time;
-  std::time_t timestamp = static_cast<std::time_t>(begin_timestamp_msec/ 1000);
-  std::tm* timeinfo = std::gmtime(&timestamp);
-  std::tm local_time;
-  if (timeinfo == nullptr) {
-    auto time_point = std::chrono::system_clock::from_time_t(timestamp);
-    auto utc_time = std::chrono::system_clock::to_time_t(time_point);
-#ifdef _WIN32
-    gmtime_s(&local_time, &utc_time);  // Windows
-#else
-    gmtime_r(&utc_time, &local_time);  // POSIX
-#endif
-    timeinfo = &local_time;
+  const std::time_t timestamp = static_cast<std::time_t>(begin_timestamp_msec / 1000);
+  std::tm tm_utc{};
+  if (!ToUtcTm(timestamp, tm_utc)) {
+    BLAZE_LOG_ERROR("[ArchiveL] GetDatFileName: failed to convert timestamp [{}]", begin_timestamp_msec);
   }
 
   char time_str[40] = {0,};
-  std::snprintf(time_str, sizeof(time_str), "%04d%02d%02d%02d%02d%02d%03d", timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday,
-                timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec, (unsigned int)(begin_timestamp_msec % 1000));
+  std::snprintf(time_str, sizeof(time_str), "%04d%02d%02d%02d%02d%02d%03d", tm_utc.tm_year + 1900, tm_utc.tm_mon + 1, tm_utc.tm_mday,
+                tm_utc.tm_hour, tm_utc.tm_min, tm_utc.tm_sec, (unsigned int)(begin_timestamp_msec % 1000));
   std::string filename_time = time_str;
 
   return (save_path/session_id).string() + "/" + filetime + "/" + filename_time + "_" + profile.ToString() + ".dat";

@@ -2,6 +2,7 @@
 //
 
 #include "pch.h"
+#include <algorithm>
 #include "RTSPTester1.h"
 #include "afxdialogex.h"
 #include "CFileLoaderTab.h"
@@ -190,6 +191,10 @@ void CFileLoaderTab::OnBnClickedBtnFileloaderFileopen()
 
 void CFileLoaderTab::OpenFileLoad(CString filePath) 
 {
+	int a = sizeof(ArchiveIndexHeader);
+	auto primary_read_object = std::make_shared<ReaderObject>(MediaProfile::kPrimary);
+	//bool seek_result = reader_worker_.Seek(channel, time.ToMilliSeconds(), archive_read_type, read_object);
+
 	CStringA filePathA(filePath);
 	std::string stdFilePath(filePathA.GetString());
 	buffers_all_.clear();
@@ -208,6 +213,8 @@ void CFileLoaderTab::OpenFileLoad(CString filePath)
 		}
 		//break;
 	}
+
+
 	MakeTree();
 }
 
@@ -452,14 +459,36 @@ void CFileLoaderTab::PasteFromClipboard() {
 
 void CFileLoaderTab::OnBnClickedBtnFileloadSeek()
 {
-	CString strSeekTime;
-	m_FileSeekTimeEdit.GetWindowText(strSeekTime);
-	long long seekTime = _ttoll(strSeekTime);
-	uint32_t sec = seekTime / 1000;
-	uint32_t usec = uint32_t((seekTime % 1000) * 1000);
-	PnxMediaTime pnxSeekTime(sec, usec);
-	read_object_ = std::make_shared<ReaderObject>(MediaProfile::kPrimary);
-	Seeker("2524ebae-0174-45e4-9ed6-bf4fdeb7c0a6", pnxSeekTime, kArchiveReadNext, read_object_);
+	//CString strSeekTime;
+	//m_FileSeekTimeEdit.GetWindowText(strSeekTime);
+	//long long seekTime = _ttoll(strSeekTime);
+	//uint32_t sec = seekTime / 1000;
+	//uint32_t usec = uint32_t((seekTime % 1000) * 1000);
+	//PnxMediaTime pnxSeekTime(sec, usec);
+	//read_object_ = std::make_shared<ReaderObject>(MediaProfile::kPrimary);
+	//Seeker("2524ebae-0174-45e4-9ed6-bf4fdeb7c0a6", pnxSeekTime, kArchiveReadNext, read_object_);
+	std::vector<fs::path> drives;
+	drives.push_back("D:");
+	std::string base_directory = "/Hanwha Vision\\BLAZE server\\Archive\\6248f6ad-4100-4c4c-a2b0-4de465eda1bd\\45ea210e-b144-40b2-80dd-e54c7c7f6de5";
+	std::string session_id = "5eaaffbc-b00e-4649-8df3-eb21096de7ac";
+	MediaProfile profile = MediaProfile::kPrimary;
+	FileSearcher file_searcher;
+	std::vector<Archive_FileInfo> file_infos;
+	unsigned long long max_value = 1786067593000;
+	for (const auto& drive : drives) {
+		std::optional<std::vector<Archive_FileInfo>> files =
+			file_searcher.GetNearestFileNames(drive.string(), base_directory, session_id, max_value, profile, ArchiveReadType::kArchiveReadPrev, true);
+		if (files.has_value()) {
+			file_infos.insert(file_infos.end(), files.value().begin(), files.value().end());
+		}
+	}
+	if (file_infos.size() == 0)
+		return;
+
+	Archive_FileInfo oldest_file = std::accumulate(file_infos.begin(), file_infos.end(), file_infos[0],
+		[](const Archive_FileInfo& a, const Archive_FileInfo& b) -> const Archive_FileInfo& { return a.time_stamp_ > b.time_stamp_ ? a : b; });
+
+
 
 	return;
 }

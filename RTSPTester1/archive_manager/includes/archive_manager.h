@@ -31,6 +31,7 @@
 #include <boost/asio.hpp>
 #include <iostream>
 #include <map>
+#include <set>
 #include <vector>
 #include <shared_mutex>
 #include <optional>
@@ -56,6 +57,9 @@ class ARCHIVE_MANAGER_API ArchiveManager {
   std::filesystem::path GetSavePath() { return save_path_; }
   std::map<std::string, std::tuple<bool, int>> GetSaveStatus();
   bool AddDevice(std::string device_driver);
+  bool HasDevice(std::string device_driver);
+  // Returns a short RAID description of the mount backing `path` (e.g. "raid5 disks=4 chunk=512K full_stripe=1536K"), or "none" if not on md RAID1/5/6.
+  std::string GetRaidInfo(const std::string& path);
   bool AddSession(std::string device_driver, SessionID session_id);
   bool DeleteDevice(std::string device_driver);
   bool DeleteAllDevices(void);
@@ -65,7 +69,8 @@ class ARCHIVE_MANAGER_API ArchiveManager {
   void ChangeArchiveSystemUUID(std::optional<std::string> prev_system_uuid, std::string target_system_uuid, std::optional<std::string> prev_server_uuid,
                                std::string target_server_uuid, std::string db_separator_name, std::function<void(bool)> callback);
   int GetOpenFileCount();
-
+  void Destroy();
+  void Restart();
   // ********** write API **********
   bool PushDataGroup(std::shared_ptr<PnxMediaArchiveDataGroup> data_group);
 
@@ -83,6 +88,15 @@ class ARCHIVE_MANAGER_API ArchiveManager {
   // GetMomory Frame
   std::shared_ptr<ArchiveChunkBuffer> GetMemoryFrames(std::string session_id, MediaProfile profile, int64_t timestamp);
   
+  // Reindexing API
+  std::optional<unsigned long long> GetCurrentFileStartTime(std::string channel_uuid, MediaProfile profile_type);
+  std::map<MediaProfile, std::vector<std::shared_ptr<ArchiveTime>>> GetRecordTime(const std::string session_id, const PnxMediaTime& begin_time, const PnxMediaTime& end_time);
+
+  // Backup API : size (byte) of the recorded chunks overlapping [begin_time, end_time], read from the file index headers only.
+  // recording_msec : recorded time inside [begin_time, end_time]
+  uint64_t GetArchiveSize(const std::string& channel_uuid, MediaProfile profile, const PnxMediaTime& begin_time, const PnxMediaTime& end_time,
+                          uint64_t& recording_msec);
+
   // ********** Return Msg **********
   //callback aw -> am
   void CallbackWirteStatusAWTAM(SessionID session_id, bool success, std::shared_ptr<std::vector<FrameWriteIndexData>> list);
@@ -93,11 +107,15 @@ class ARCHIVE_MANAGER_API ArchiveManager {
   // Channel metadata mapping
   void RegisterChannelMetadata(const std::string& channel_uuid, const std::optional<int>& channel_index, const std::optional<std::string>& mac_address, const std::optional<std::string>& ip_address);
   void UnregisterChannelMetadata(const std::string& channel_uuid);
+  // mac_address is empty for ip camera, ip_address is kept as is when empty
+  void UpdateChannelAddress(const std::string& channel_uuid, const std::string& mac_address, const std::string& ip_address, int channel_index);
 
  private:
   std::filesystem::path save_path_;
   std::map<std::string, std::shared_ptr<ArchiveWorker>> archive_workers;  // key:  Drive
   std::map<std::string, std::string> device_session_index;
+  std::set<std::string> registered_drives_;  // Drives added by AddDevice. Removed only by DeleteDevice (not cleared by Destroy)
+  std::shared_mutex mtx_registered_drives_;
   std::shared_mutex mtx_worker;
   std::shared_mutex callback_mtx;
   ReaderWorker reader_worker_;
@@ -108,6 +126,6 @@ class ARCHIVE_MANAGER_API ArchiveManager {
   std::shared_mutex channel_metadata_mutex_;
   
   static ArchiveManager* archive_manager_;
-  static std::mutex mtx;
+  std::atomic<bool> destroyed_{false};
   bool CheckWorkerDrive(std::string session_id, std::string save_driver, std::shared_ptr<ArchiveWorker> workerptr);
 };

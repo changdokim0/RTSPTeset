@@ -50,6 +50,7 @@ class FileIndexer {
   std::shared_ptr<ArchiveIndexHeader> GetIndexHeader();
   std::shared_ptr<ArchiveIndexHeader> GetPrevIndex();
   std::shared_ptr<ArchiveIndexHeader> GetNextIndex();
+  std::shared_ptr<ArchiveIndexHeader> GetFirstHeader();
 
  private:
 

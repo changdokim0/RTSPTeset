@@ -40,6 +40,12 @@
 #include "file_searcher.h"
 #include "archive_chunk_buffer.h"
 
+struct SearchFileEntry {
+  std::filesystem::path file_path;
+  std::filesystem::path drive;
+  MediaProfile profile_type;
+};
+
 class ReaderWorker 
 {
  public:
@@ -60,12 +66,18 @@ class ReaderWorker
   std::optional<std::vector<std::shared_ptr<StreamBuffer>>> GetNextData(ArchiveType get_video_type, std::shared_ptr<ReaderObject> read_object);
   bool IsInGOP(const PnxMediaTime& time, std::shared_ptr<ReaderObject> reader_object);
 
+  std::map<MediaProfile, std::vector<SearchFileEntry>> GetSearchFile(const std::string session_id, const PnxMediaTime& begin_time, const PnxMediaTime& end_time);
+  std::vector<std::shared_ptr<ArchiveTime>> GetTimeInfo(std::vector<SearchFileEntry> files, const PnxMediaTime& begin_time, const PnxMediaTime& end_time, MediaProfile profile);
+  uint64_t GetArchiveSize(const std::vector<SearchFileEntry>& files, const PnxMediaTime& begin_time, const PnxMediaTime& end_time, MediaProfile profile,
+                          uint64_t& recording_msec);
+
  private:
   std::vector<std::filesystem::path> drives_;
   std::filesystem::path save_path_;
   std::mutex drive_mtx_;
   std::filesystem::path drive_;
 
+  std::tm GetTmFromTimestamp(unsigned long long data_time);
   bool ParseHeader(std::string file_name, std::shared_ptr<ReaderObject> read_object);
   time_t getNextHourLastSecond(time_t timestamp, int add_hour, ArchiveReadType archive_read_type);
   std::optional<std::vector<std::shared_ptr<StreamBuffer>>> GetNextFrameIfFileUpdated(ArchiveType get_video_type, std::shared_ptr<ReaderObject> read_object);

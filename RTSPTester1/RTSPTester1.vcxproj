@@ -204,6 +204,7 @@
     <ClInclude Include="archive_manager\includes\archive_object.h" />
     <ClInclude Include="archive_manager\modules\includes\archive_chunk_buffer.h" />
     <ClInclude Include="archive_manager\modules\includes\archive_util.h" />
+    <ClInclude Include="archive_manager\modules\includes\chunk_header_pool.h" />
     <ClInclude Include="archive_manager\modules\includes\data_loader.h" />
     <ClInclude Include="archive_manager\modules\includes\file_indexer.h" />
     <ClInclude Include="archive_manager\modules\includes\file_searcher.h" />
@@ -229,6 +230,7 @@
     <ClCompile Include="archive_manager\archive_define.cc" />
     <ClCompile Include="archive_manager\modules\archive_chunk_buffer.cc" />
     <ClCompile Include="archive_manager\modules\archive_util.cc" />
+    <ClCompile Include="archive_manager\modules\chunk_header_pool.cc" />
     <ClCompile Include="archive_manager\modules\data_loader.cc" />
     <ClCompile Include="archive_manager\modules\file_indexer.cc" />
     <ClCompile Include="archive_manager\modules\file_searcher.cc" />
